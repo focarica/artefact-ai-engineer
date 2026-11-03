@@ -3,11 +3,12 @@
 import hashlib
 
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.usage import UsageLimits
 
 from .agent import StoreContext
 from .history import TurnStore
+from .scope import input_guardrail
 
 
 class ChatSession:
@@ -46,15 +47,25 @@ class ChatSession:
     def respond(self, message: str) -> str:
         if not message.strip():
             raise ValueError('message must not be empty')
+        guarded_response = input_guardrail(message)
+        if guarded_response:
+            self._remember_turn([
+                ModelRequest(parts=[UserPromptPart(content=message)]),
+                ModelResponse(parts=[TextPart(content=guarded_response)]),
+            ])
+            return guarded_response
         history = [item for turn in self._turns for item in turn]
         result = self.agent.run_sync(
             message, deps=self.context, message_history=history,
             usage_limits=UsageLimits(request_limit=8, tool_calls_limit=12), timeout=120,
         )
         turn = result.new_messages()
+        self._remember_turn(turn)
+        return result.output
+
+    def _remember_turn(self, turn: list[ModelMessage]) -> None:
         self._turns.append(turn)
         self._turns = self._turns[-self.turn_limit:]
         if self.history and self._history_key:
             self.history.append(self._history_key, turn)
             self.history.prune(self._history_key, keep=self.turn_limit)
-        return result.output

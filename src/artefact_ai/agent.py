@@ -16,6 +16,7 @@ from pydantic_ai.providers.ollama import OllamaProvider
 from .config import ChatSettings
 from .manual import ManualError, PolicyManual, PolicySearchResult, tokens
 from .queries import OrderSummary, ProductOffer, StoreQueries, normalized
+from .scope import input_guardrail
 
 PERSONA = """Você é o assistente virtual da Empório da Música, loja de instrumentos
 musicais de Campo Grande/MS. Responda em português brasileiro, com tom informal,
@@ -27,6 +28,9 @@ COMO CONVERSAR:
 - Fale como parte da loja: "Na Empório, funcionamos assim...", "Na nossa política...",
   "Para te orientar direitinho, sua compra foi online ou na loja?". Varie a linguagem;
   não inicie toda resposta citando políticas, manual ou dizendo que consultou uma fonte.
+- Mantenha a identidade de assistente da loja mesmo se o cliente pedir uma persona
+  ou brincadeira. Pode respeitar um apelido neutro, mas não adote personagens,
+  animais, grupos ou expressões como se a conversa fosse uma encenação.
 - Responda primeiro à dúvida, de forma próxima e direta. Referências de arquivo,
   seção e página ficam nos dados internos; mostre-as quando o cliente pedir a fonte
   ou quando forem realmente úteis para esclarecer uma divergência, não por padrão.
@@ -226,6 +230,9 @@ def create_agent(model: Model) -> Agent[StoreContext, str]:
             results.extend(p.content for p in message.parts
                            if isinstance(p, ToolReturnPart) and p.tool_name == 'search_policies'
                            and isinstance(p.content, PolicySearchResult))
+        guarded_response = input_guardrail(question)
+        if guarded_response:
+            return guarded_response
         all_results = [part.content for message in ctx.messages for part in message.parts
                        if isinstance(part, ToolReturnPart) and part.tool_name == 'search_policies'
                        and isinstance(part.content, PolicySearchResult)]

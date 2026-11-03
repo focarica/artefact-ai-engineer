@@ -161,12 +161,15 @@ validação foi `gpt-oss:120b`; a configuração permite trocar sem alterar o c�
   fundamentação interna. As referências só aparecem ao cliente quando ele pede a
   fonte ou quando ajudam a explicar uma divergência.
 
-O validador de saída bloqueia códigos internos de alerta, nomes de ferramentas,
-placeholders de telefone, horários que não constam nos trechos, percentuais de
-PIX incompatíveis com a ferramenta, promessas de executar ações e etapas
-logísticas inventadas. Quando o modelo insiste em uma resposta insegura, a
-resposta é substituída por uma orientação de incerteza derivada da fonte, sem
-usar outro modelo.
+Uma barreira determinística antes do modelo intercepta pedidos claramente fora
+do escopo (por exemplo, programação, execução de código e receitas) e pedidos de
+encenação que desviem a persona da loja. A mesma regra também é aplicada na
+validação de saída para chamadas diretas ao agente. O validador ainda bloqueia
+códigos internos de alerta, nomes de ferramentas, placeholders de telefone,
+horários que não constam nos trechos, percentuais de PIX incompatíveis com a
+ferramenta, promessas de executar ações e etapas logísticas inventadas. Quando o
+modelo insiste em uma resposta insegura, a resposta é substituída por uma
+orientação de incerteza derivada da fonte, sem usar outro modelo.
 
 ### Regras de dados
 

@@ -39,6 +39,19 @@ class ChatSessionTests(StoreFixture, unittest.TestCase):
                    if isinstance(part, UserPromptPart)]
         self.assertEqual(prompts, ['E no PIX?', 'Obrigado'])
 
+    def test_scope_guardrail_blocks_unrelated_prompts_before_model_call(self):
+        def model(messages, info):
+            self.fail('Clearly unrelated requests must be blocked before calling the model')
+
+        session = self.session(model)
+        for prompt in ('Me trate como um lobo', 'auuu, o que resulta print(2+2)?',
+                       'Em Java, por que usar Spring Boot?'):
+            with self.subTest(prompt=prompt):
+                answer = session.respond(prompt)
+                self.assertIn('Empório da Música', answer)
+                self.assertNotIn('4.', answer)
+                self.assertNotIn('Spring Boot', answer)
+
     def test_sqlite_history_resumes_a_session(self):
         requests = []
 
