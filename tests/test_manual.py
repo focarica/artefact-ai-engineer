@@ -48,6 +48,26 @@ Página 4''',
 ]
 
 
+def write_manual_pdf(path: Path, lines: list[str]) -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=600, height=800)
+    page[NameObject('/Resources')] = DictionaryObject({
+        NameObject('/Font'): DictionaryObject({NameObject('/F1'): DictionaryObject({
+            NameObject('/Type'): NameObject('/Font'), NameObject('/Subtype'): NameObject('/Type1'),
+            NameObject('/BaseFont'): NameObject('/Helvetica'),
+        })}),
+    })
+    commands = [b'BT /F1 12 Tf 50 750 Td']
+    for line in lines:
+        escaped = line.replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+        commands.append(f'({escaped}) Tj 0 -20 Td'.encode('latin-1'))
+    commands.append(b'ET')
+    stream = DecodedStreamObject()
+    stream.set_data(b' '.join(commands))
+    page.replace_contents(stream)
+    writer.write(path)
+
+
 class ManualTests(unittest.TestCase):
     def setUp(self):
         self.manual = PolicyManual.from_pages(PAGES, source='políticas.pdf')
@@ -100,22 +120,19 @@ class ManualTests(unittest.TestCase):
             with self.subTest(query=query, limit=limit), self.assertRaises(ValueError):
                 self.manual.search(query, limit=limit)
 
+    def test_contacts_shipping_boundary_and_payment_ambiguities_are_reported(self):
+        warnings = self.manual.cautions(self.manual.passages)
+        self.assertEqual({warning.code for warning in warnings},
+                         {'conflicting_contacts', 'shipping_boundary', 'payment_terms', 'online_withdrawal'})
+        self.assertEqual(next(w.amount_brl for w in warnings if w.code == 'shipping_boundary'), '500')
+
+    def test_unambiguous_chapter_has_no_warning(self):
+        self.assertEqual(self.manual.cautions(self.manual.search('horário', limit=1)), ())
+
     def test_real_pdf_extraction(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'manual.pdf'
-            writer = PdfWriter()
-            page = writer.add_blank_page(width=600, height=800)
-            page[NameObject('/Resources')] = DictionaryObject({
-                NameObject('/Font'): DictionaryObject({NameObject('/F1'): DictionaryObject({
-                    NameObject('/Type'): NameObject('/Font'), NameObject('/Subtype'): NameObject('/Type1'),
-                    NameObject('/BaseFont'): NameObject('/Helvetica'),
-                })}),
-            })
-            stream = DecodedStreamObject()
-            stream.set_data(b'BT /F1 12 Tf 50 750 Td (2. Horario de Funcionamento) Tj '
-                            b'0 -20 Td (Sabado 09:00 as 13:00) Tj ET')
-            page.replace_contents(stream)
-            writer.write(path)
+            write_manual_pdf(path, ['2. Horario de Funcionamento', 'Sabado 09:00 as 13:00'])
             result = PolicyManual.from_pdf(path).search('horario')[0]
             self.assertIn('Sabado', result.text)
             self.assertEqual(result.page, 1)

@@ -6,6 +6,7 @@ tables stay with their rules. No embeddings, database or additional model needed
 
 from collections import Counter
 from dataclasses import dataclass
+from decimal import Decimal
 import math
 from pathlib import Path
 import re
@@ -54,9 +55,17 @@ class ManualPassage:
 
 
 @dataclass(frozen=True)
+class PolicyCaution:
+    code: Literal['conflicting_contacts', 'shipping_boundary', 'payment_terms', 'online_withdrawal']
+    message: str
+    amount_brl: str | None = None
+
+
+@dataclass(frozen=True)
 class PolicySearchResult:
     status: Literal['ok', 'not_found', 'unavailable']
     passages: tuple[ManualPassage, ...] = ()
+    cautions: tuple[PolicyCaution, ...] = ()
 
 
 class PolicyManual:
@@ -146,3 +155,31 @@ class PolicyManual:
                 ranked.append((section, score))
         selected = sorted(ranked, key=lambda item: -item[1])[:limit]
         return tuple(passage for section, _ in selected for passage in self._chapters[section])
+
+    @staticmethod
+    def cautions(passages: tuple[ManualPassage, ...]) -> tuple[PolicyCaution, ...]:
+        """Surface conflicting facts and open boundaries without inventing a resolution."""
+        text = normalized('\n'.join(p.text for p in passages))
+        cautions = []
+        phones = {re.sub(r'\D', '', match) for match in re.findall(r'\(\d{2}\)\s*\d{4,5}-\d{4}', text)}
+        if len(phones) > 1:
+            cautions.append(PolicyCaution('conflicting_contacts',
+                'Há telefones divergentes nos trechos. Não confirme um único número como correto; '
+                'explique a divergência, cite as fontes e oriente confirmar com a equipe.'))
+        above = {amount.rstrip('.,') for amount in re.findall(r'acima de r\$\s*([\d.,]+)', text)}
+        below = {amount.rstrip('.,') for amount in re.findall(r'abaixo de r\$\s*([\d.,]+)', text)}
+        for amount in sorted(above & below):
+            value = str(Decimal(amount.replace('.', '').replace(',', '.')))
+            cautions.append(PolicyCaution('shipping_boundary',
+                f'O manual só define valores acima e abaixo de R$ {amount}. Para valor exatamente igual, '
+                'não confirme gratuidade nem cobrança: o caso não está definido e exige confirmação da equipe.', value))
+        if len(set(re.findall(r'parcela minima(?: de)? r\$\s*([\d.,]+)', text))) > 1:
+            cautions.append(PolicyCaution('payment_terms',
+                'Há condições gerais e faixas detalhadas com parcelas mínimas diferentes. '
+                'Explique os trechos e solicite confirmação em caso de dúvida, sem escolher silenciosamente uma regra.'))
+        if 'direito de arrependimento (compras online)' in text:
+            cautions.append(PolicyCaution('online_withdrawal',
+                'A seção de arrependimento cobre compras online. Não estenda esse direito a compras presenciais '
+                'nem invente interpretação do CDC. Para presencial, consulte as demais modalidades de troca '
+                'ou oriente confirmar com a equipe.'))
+        return tuple(cautions)
