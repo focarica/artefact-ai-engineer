@@ -86,7 +86,7 @@ class AgentTests(StoreFixture, unittest.TestCase):
         self.assertEqual(result.status, 'not_found')
         self.assertEqual(result.passages, ())
 
-    def test_policy_answer_without_citation_is_retried(self):
+    def test_explicit_source_request_requires_reference(self):
         path = self.directory / 'manual.pdf'
         write_manual_pdf(path, ['2. Horario de Funcionamento', 'Sabado 09:00 as 13:00'])
         calls = []
@@ -98,9 +98,54 @@ class AgentTests(StoreFixture, unittest.TestCase):
             answer = 'Abre às 09:00.' if len(calls) == 2 else 'Abre às 09:00 (manual, seção 2, página 1).'
             return ModelResponse(parts=[TextPart(answer)])
 
-        result = create_agent(FunctionModel(model)).run_sync('Qual o horário?', deps=self.context(manual_path=path))
+        result = create_agent(FunctionModel(model)).run_sync('Qual o horário? Cite a fonte.', deps=self.context(manual_path=path))
         self.assertIn('página 1', result.output)
         self.assertEqual(len(calls), 3)
+
+    def test_normal_policy_answer_does_not_require_visible_citations(self):
+        path = self.directory / 'manual.pdf'
+        write_manual_pdf(path, ['2. Horario de Funcionamento', 'Sabado 09:00 as 13:00'])
+        calls = []
+
+        def model(messages, info):
+            calls.append(1)
+            if len(calls) == 1:
+                return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'horário'})])
+            return ModelResponse(parts=[TextPart('Na Empório, abrimos aos sábados das 9h às 13h!')])
+
+        result = create_agent(FunctionModel(model)).run_sync('Qual o horário de sábado?',
+                                                           deps=self.context(manual_path=path))
+        self.assertEqual(result.output, 'Na Empório, abrimos aos sábados das 9h às 13h!')
+        self.assertEqual(len(calls), 2)
+
+    def test_internal_alert_codes_are_rewritten_in_customer_language(self):
+        path = self.directory / 'manual.pdf'
+        write_manual_pdf(path, ['2. Horario de Funcionamento', 'Sabado 09:00 as 13:00'])
+        for label in ['conflicting_contacts', 'online_withdrawal', 'payment_terms', 'shipping_boundary',
+                      'search_policies', r'online\_withdrawal']:
+            calls = []
+
+            def model(messages, info):
+                calls.append(1)
+                if len(calls) == 1:
+                    return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'horário'})])
+                answer = f'Abrimos às 9h (alerta *{label}*).' if len(calls) == 2 else 'Abrimos às 9h. Posso ajudar com mais alguma coisa?'
+                return ModelResponse(parts=[TextPart(answer)])
+
+            with self.subTest(label=label):
+                result = create_agent(FunctionModel(model)).run_sync('Qual o horário?',
+                                                                   deps=self.context(manual_path=path))
+                self.assertEqual(result.output, 'Abrimos às 9h. Posso ajudar com mais alguma coisa?')
+                self.assertEqual(len(calls), 3)
+
+    def test_persistent_internal_metadata_is_never_displayed_even_without_tools(self):
+        def model(messages, info):
+            return ModelResponse(parts=[TextPart('Observação: cuidado online_withdrawal.')])
+
+        result = create_agent(FunctionModel(model)).run_sync('Oi!', deps=self.context())
+        self.assertNotIn('online_withdrawal', result.output)
+        self.assertNotIn('Observação', result.output)
+        self.assertIn('te orientar', result.output)
 
     def test_shipping_boundary_cannot_be_silently_decided(self):
         path = self.directory / 'manual.pdf'
@@ -190,9 +235,10 @@ class AgentTests(StoreFixture, unittest.TestCase):
 
         result = create_agent(FunctionModel(model)).run_sync('Meu pedido deu R$ 500. Qual o frete?',
                                                            deps=self.context(manual_path=path))
-        self.assertIn('não define', result.output)
+        self.assertIn('preciso confirmar', result.output)
         self.assertIn('equipe', result.output)
-        self.assertIn('página 1', result.output)
+        self.assertNotIn('página', result.output)
+        self.assertNotIn('Fonte:', result.output)
         self.assertNotIn('pagará', result.output)
         self.assertNotIn('R$ 35', result.output)
 

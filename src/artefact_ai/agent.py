@@ -23,6 +23,17 @@ acolhedor e profissional, como um amigo que entende de música. Seja claro e bre
 sem linguagem robotizada nem intimidade excessiva. Entenda a necessidade antes de
 recomendar e faça perguntas quando faltarem informações.
 
+COMO CONVERSAR:
+- Fale como parte da loja: "Na Empório, funcionamos assim...", "Na nossa política...",
+  "Para te orientar direitinho, sua compra foi online ou na loja?". Varie a linguagem;
+  não inicie toda resposta citando políticas, manual ou dizendo que consultou uma fonte.
+- Responda primeiro à dúvida, de forma próxima e direta. Referências de arquivo,
+  seção e página ficam nos dados internos; mostre-as quando o cliente pedir a fonte
+  ou quando forem realmente úteis para esclarecer uma divergência, não por padrão.
+- Nunca exponha identificadores, campos, nomes de ferramentas ou avisos técnicos.
+  Não reproduza os códigos dos alertas nem transforme orientações internas em
+  observações ou cuidados dirigidos ao cliente. Explique apenas o efeito prático.
+
 REGRAS DE ATENDIMENTO:
 - Consulte as ferramentas antes de informar preços, estoque, promoções ou pedidos.
   Nunca invente informações nem afirme que os dados são de estoque em tempo real:
@@ -43,7 +54,7 @@ REGRAS DE ATENDIMENTO:
 - Consulte search_policies antes de responder sobre endereço, horários, contato,
   pagamentos, frete, promoções, privacidade, garantia ou trocas/devoluções.
   Formule uma busca específica para a dúvida. Fundamente a resposta nos trechos
-  retornados e cite brevemente seção e página do manual. Não invente regras.
+  retornados, sem inventar regras. Não precisa anunciar a consulta ao cliente.
   Se não encontrar evidência suficiente ou o manual estiver indisponível, diga
   que não conseguiu confirmar e oriente consultar a equipe, sem completar de memória.
 - Em devoluções, pergunte se a compra foi online ou presencial e há quantos dias
@@ -133,7 +144,8 @@ def create_agent(model: Model) -> Agent[StoreContext, str]:
 
         Busque por assunto (ex.: endereço, horários, arrependimento online, parcelamento,
         frete, garantia, contatos). Retorna capítulos completos, com subseções, condições,
-        exceções e continuação entre páginas. Cite seção e página na resposta.
+        exceções e continuação entre páginas. As referências são para fundamentação interna;
+        cite-as se o cliente pedir. Os avisos orientam a resposta, não devem ser reproduzidos.
         not_found não confirma uma regra; unavailable significa que o PDF não pôde ser lido.
         """
         if ctx.deps.manual_path is None:
@@ -162,58 +174,75 @@ def create_agent(model: Model) -> Agent[StoreContext, str]:
                            if isinstance(p, ToolReturnPart) and p.tool_name == 'search_policies'
                            and isinstance(p.content, PolicySearchResult))
         passages = [p for result in results for p in result.passages]
-        if not passages:
-            return answer
+        presentation_issues = []
+        internal_labels = ('conflicting_contacts', 'shipping_boundary', 'payment_terms', 'online_withdrawal',
+                           'search_policies', 'search_products', 'product_offer', 'order_summary', 'cautions',
+                           'PolicySearchResult', 'PolicyCaution', 'ManualPassage', 'not_found', 'unavailable')
+        presentation = re.sub(r'[\s\\*_`-]', '', normalized(answer))
+        if any(re.sub(r'_', '', normalized(label)) in presentation for label in internal_labels):
+            presentation_issues.append('Reescreva sem códigos, nomes de campos ou ferramentas e sem avisos técnicos. '
+                                       'Fale diretamente com o cliente, como parte da loja.')
+        wants_sources = bool(re.search(
+            r'\b(?:fonte|fontes|referencia|referencias|pagina|paginas|secao|secoes|cite|citacao)\b'
+            r'|onde.{0,30}(?:escrito|consta|encontro)|de onde.{0,30}(?:informacao|regra)', normalized(question)))
         text = re.sub(r'[*_`]', '', normalized(answer))
         confirms_with_team = (any(term in text for term in ('confirm', 'verifi', 'valid'))
                               and any(term in text for term in ('equipe', 'gerencia', 'atendente')))
         pages = {int(number) for number in re.findall(r'\b(?:pagina|pag\.?|p\.)\s*(\d+)\b', text)}
         sections = re.findall(r'(?:secao|§)\s*(\d+)(?:\.\d+)*', text)
-        issues = []
+        issues = list(presentation_issues)
         safe_notes = []
-        if not any(p.page in pages and (p.section.split('.')[0] in sections or 'capa' in text)
-                   for p in passages):
+        if passages and wants_sources and not any(
+                p.page in pages and (p.section.split('.')[0] in sections or 'capa' in text) for p in passages):
             issues.append('Inclua referência explícita de seção e página dos trechos retornados pelo manual.')
         for result in results:
             for caution in result.cautions:
                 if caution.code == 'conflicting_contacts' and 'telefone' in tokens(question):
-                    if not (confirms_with_team and any(term in text for term in ('diverg', 'conflit', 'contradi', 'inconsisten'))):
+                    if not (confirms_with_team and any(term in text for term in
+                            ('diverg', 'diferent', 'dois numeros', 'conflit', 'contradi', 'inconsisten'))):
                         issues.append(caution.message)
-                        safe_notes.append('Encontrei telefones divergentes no manual. Não consigo confirmar um único '
-                                          'contato como correto; confirme o número atual com a equipe da loja.')
+                        safe_notes.append('Quero te passar o contato certo, mas encontrei dois números diferentes '
+                                          'nas nossas informações. É melhor confirmar o WhatsApp atualizado com a equipe.')
                 if caution.code == 'payment_terms' and {'parcelamento', 'credito'} & set(tokens(question)):
-                    if not (confirms_with_team and any(term in text for term in ('geral', 'gerais'))
-                            and any(term in text for term in ('diverg', 'diferent', 'conflit', 'contradi', 'inconsisten'))):
+                    if not (confirms_with_team and any(term in text for term in
+                            ('diverg', 'diferent', 'conflit', 'contradi', 'inconsisten'))):
                         issues.append(caution.message)
-                        safe_notes.append('A tabela geral de crédito e as regras detalhadas de parcelamento trazem '
-                                          'parcelas mínimas diferentes. Para não confirmar uma condição incorreta, '
-                                          'confirme com a equipe quais condições se aplicam à sua compra.')
+                        safe_notes.append('Preciso confirmar esse detalhe com a equipe: nossas informações de '
+                                          'parcelamento trazem valores mínimos diferentes. Não quero te passar '
+                                          'uma condição errada para a sua compra.')
                 if caution.code == 'shipping_boundary' and caution.amount_brl:
                     amount = caution.amount_brl.split('.')[0]
                     if re.search(rf'\b{re.escape(amount)}(?:[.,]00)?\b', question):
                         if not (confirms_with_team and any(term in text for term in
-                                ('nao defin', 'nao esta defin', 'nao especific', 'lacuna', 'ambigu'))):
+                                ('nao defin', 'nao esta defin', 'nao especific', 'nao esclarec', 'nao consigo confirmar',
+                                 'preciso confirmar', 'nao tenho certeza', 'lacuna', 'ambigu'))):
                             issues.append(caution.message)
-                            safe_notes.append(f'O manual não define o frete para um pedido de exatamente R$ {amount}. '
-                                              'Não consigo confirmar gratuidade nem cobrança nesse limite; '
-                                              'confirme o valor com a equipe da loja.')
+                            safe_notes.append(f'Para um pedido de exatamente R$ {amount}, preciso confirmar o frete '
+                                              'com a equipe. Nossas condições não esclarecem esse valor exato, '
+                                              'então prefiro não te passar uma cobrança ou gratuidade sem certeza.')
                 if caution.code == 'online_withdrawal':
                     for clause in re.findall(r'[^.!?\n]+[.!?]?', text):
                         if (not clause.rstrip().endswith('?') and 'presencial' in clause
                                 and ('arrependimento' in clause or 'tambem' in clause)
                                 and not re.search(r'\b(?:nao|apenas|somente|exclusivamente)\b', clause)):
                             issues.append(caution.message)
-                            safe_notes.append('O manual descreve o arrependimento para compras online. Não posso '
-                                              'estender essa regra a uma compra presencial. Confirme o canal da compra '
-                                              'e há quantos dias recebeu o produto; para outros casos, consulte a equipe.')
+                            safe_notes.append('Na nossa política, esse prazo está descrito para compras online. '
+                                              'Se foi na loja, vale confirmar com a equipe quais opções de troca '
+                                              'se aplicam. Sua compra foi online ou presencial, e há quantos dias '
+                                              'você recebeu o produto?')
                             break
         if issues:
             if safe_notes and ctx.retry >= ctx.max_retries:
                 # If the model keeps deciding an undefined case, discard its
                 # answer completely. Only source-derived uncertainty is exposed;
                 # no alternate/local model is called.
-                references = dict.fromkeys(f'{p.source}, seção {p.section}, página {p.page}' for p in passages)
-                return '\n\n'.join(dict.fromkeys(safe_notes)) + '\n\nFonte: ' + '; '.join(references) + '.'
+                response = '\n\n'.join(dict.fromkeys(safe_notes))
+                if wants_sources:
+                    references = dict.fromkeys(f'{p.source}, seção {p.section}, página {p.page}' for p in passages)
+                    response += '\n\nFonte: ' + '; '.join(references) + '.'
+                return response
+            if presentation_issues and ctx.retry >= ctx.max_retries:
+                return 'Preciso confirmar essa informação com a equipe para te orientar direitinho.'
             raise ModelRetry('\n'.join(dict.fromkeys(issues)))
         return answer
 

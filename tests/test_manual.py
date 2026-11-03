@@ -4,8 +4,10 @@ import unittest
 
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+from pydantic_core import to_jsonable_python
+from pydantic_ai.messages import ToolReturnPart
 
-from artefact_ai.manual import ManualError, PolicyManual
+from artefact_ai.manual import ManualError, PolicyCaution, PolicyManual, PolicySearchResult
 
 PAGES = [
     '''Empório da Música Manual de Políticas e Procedimentos
@@ -71,6 +73,18 @@ def write_manual_pdf(path: Path, lines: list[str]) -> None:
 class ManualTests(unittest.TestCase):
     def setUp(self):
         self.manual = PolicyManual.from_pages(PAGES, source='políticas.pdf')
+
+    def test_alert_identifiers_stay_internal_when_tool_results_are_serialized(self):
+        caution = PolicyCaution('conflicting_contacts', 'Confirme o contato atualizado com a equipe.')
+        result = PolicySearchResult('ok', cautions=(caution,))
+        payload = to_jsonable_python(result)
+        self.assertNotIn('code', payload['cautions'][0])
+        self.assertNotIn('conflicting_contacts', str(payload))
+        self.assertIn('Confirme o contato', payload['cautions'][0]['message'])
+        self.assertEqual(caution.code, 'conflicting_contacts')
+        tool_message = ToolReturnPart('search_policies', result).model_response_str()
+        self.assertNotIn('conflicting_contacts', tool_message)
+        self.assertNotIn('"code"', tool_message)
 
     def test_address_is_not_confused_with_privacy_mentions(self):
         passages = self.manual.search('Qual o endereço da loja?', limit=1)

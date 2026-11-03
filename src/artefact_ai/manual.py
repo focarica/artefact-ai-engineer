@@ -10,8 +10,10 @@ from decimal import Decimal
 import math
 from pathlib import Path
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
+from pydantic import Field
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
@@ -54,9 +56,11 @@ class ManualPassage:
     text: str
 
 
-@dataclass(frozen=True)
+@pydantic_dataclass(frozen=True)
 class PolicyCaution:
-    code: Literal['conflicting_contacts', 'shipping_boundary', 'payment_terms', 'online_withdrawal']
+    # The application needs the identifier, but the model only needs the guidance.
+    code: Annotated[Literal['conflicting_contacts', 'shipping_boundary', 'payment_terms', 'online_withdrawal'],
+                    Field(exclude=True)]
     message: str
     amount_brl: str | None = None
 
@@ -165,7 +169,7 @@ class PolicyManual:
         if len(phones) > 1:
             cautions.append(PolicyCaution('conflicting_contacts',
                 'Há telefones divergentes nos trechos. Não confirme um único número como correto; '
-                'explique a divergência, cite as fontes e oriente confirmar com a equipe.'))
+                'explique a dúvida de forma natural e oriente confirmar o contato atualizado com a equipe.'))
         above = {amount.rstrip('.,') for amount in re.findall(r'acima de r\$\s*([\d.,]+)', text)}
         below = {amount.rstrip('.,') for amount in re.findall(r'abaixo de r\$\s*([\d.,]+)', text)}
         for amount in sorted(above & below):
