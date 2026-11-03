@@ -60,3 +60,24 @@ configurar a infraestrutura local conforme as decisões do autor.
 ambiente do processo. Não carrega `.env` automaticamente. Para executar comandos
 Python com esse arquivo, use `uv run --env-file .env ...`. O limite de histórico
 conta turnos completos, incluindo chamadas e respostas de ferramentas.
+
+## Migrações do banco
+
+Depois de subir o PostgreSQL, aplique o schema do histórico:
+
+```sh
+docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < migrations/001_conversation_history.sql
+```
+
+A migração é transacional, registra sua versão e permite reexecução. Sessões têm
+UUID; cada turno guarda a lista completa de mensagens PydanticAI em JSONB para
+preservar as chamadas de ferramentas. O índice primário permite recuperar os
+últimos turnos por sessão. Ainda falta implementar o repositório Python que grava
+e recupera essas mensagens. As tabelas vetoriais serão adicionadas após escolher
+o modelo de embeddings e sua dimensão.
+
+Testes de configuração (sem banco ou credenciais de modelo):
+
+```sh
+uv run python -m unittest discover -s tests
+```
