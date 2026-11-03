@@ -53,3 +53,10 @@ Os CSVs continuam sendo a fonte das consultas operacionais.
 
 Codex foi utilizado para preparar a estrutura inicial, analisar os requisitos e
 configurar a infraestrutura local conforme as decisões do autor.
+
+## Configuração da aplicação
+
+`Settings.from_env()` lê `DATABASE_URL`, `DATA_DIR` e `HISTORY_TURN_LIMIT` do
+ambiente do processo. Não carrega `.env` automaticamente. Para executar comandos
+Python com esse arquivo, use `uv run --env-file .env ...`. O limite de histórico
+conta turnos completos, incluindo chamadas e respostas de ferramentas.
