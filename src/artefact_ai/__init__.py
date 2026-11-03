@@ -1,2 +1,7 @@
+"""Empório da Música customer service assistant."""
+
+
 def main() -> None:
-    print("Hello from artefact-ai!")
+    from .cli import main as run
+
+    run()

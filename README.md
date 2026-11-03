@@ -26,7 +26,7 @@ docker compose up -d --wait
 ```
 
 O Compose carrega `.env` para configurar o banco. `DATABASE_URL` fica disponível para
-uso pela futura camada de persistência; a aplicação ainda não carrega essa variável.
+uso pela futura camada de persistência; a configuração Python lê essa variável do ambiente do processo.
 O banco atende em `localhost:5432`, com dados preservados no volume `postgres_data`.
 A imagem fixa PostgreSQL 16 e pgvector 0.8.7.
 
@@ -45,9 +45,10 @@ Alterar as credenciais em `.env` não altera um banco já inicializado.
 
 ## Estado atual
 
-Pacote UV, PydanticAI, Typer e infraestrutura do banco preparados. Agente, CLI de chat,
-conexão Python, tabelas de histórico e indexação vetorial ainda serão implementados.
-Os CSVs continuam sendo a fonte das consultas operacionais.
+Configuração, carregamento validado dos CSVs e consultas de catálogo/pedidos via
+CLI implementados. Infraestrutura PostgreSQL e migração do histórico preparadas,
+com execução no banco ainda pendente de validação neste ambiente. Chat com LLM,
+persistência Python, extração PDF e busca vetorial ainda serão implementados.
 
 ## Uso de IA
 
@@ -77,6 +78,47 @@ e recupera essas mensagens. As tabelas vetoriais serão adicionadas após escolh
 o modelo de embeddings e sua dimensão.
 
 Testes de configuração (sem banco ou credenciais de modelo):
+
+```sh
+uv run python -m unittest discover -s tests
+```
+
+## Consultas locais sem banco ou modelo
+
+Execute na raiz do repositório, após `uv sync`. Os CSVs fornecidos pelo desafio
+precisam estar em `../data`, ou em um diretório informado com `--data-dir`/`DATA_DIR`.
+São aceitos os nomes originais (`desafio_tecnico_ai_eng - products.csv`) ou nomes
+simples (`products.csv`), com exatamente um arquivo por tabela.
+
+```sh
+uv run artefact-ai --help
+uv run artefact-ai catalog --category 'Violões' --max-price 1000
+uv run artefact-ai catalog 'Takamine GD20'
+uv run artefact-ai product 81
+uv run artefact-ai order 1 --customer-id 3
+uv run artefact-ai catalog --data-dir /caminho/dos/csvs
+```
+
+A saída é JSON com valores monetários como strings decimais. As consultas carregam
+os CSVs a cada comando: representam o snapshot fornecido, sem integração com um
+sistema de estoque em produção. Todos os seis CSVs são necessários nesta etapa.
+
+- Busca ignora acentos e caixa; ordena por preço e identifica produtos por ID.
+- Catálogo recomenda apenas produtos ativos com estoque. Use
+  `--include-unavailable` para inspecionar também os demais.
+- O orçamento usa preço promocional antes de desconto PIX. PIX aplica 5% apenas
+  quando não há promoção ativa. Arredondamento monetário é feito por centavo.
+- Se houver múltiplas promoções ativas, assumimos o maior desconto, sem acumular;
+  empates usam o menor ID. Esta é uma interpretação documentada do protótipo.
+- `--customer-id` serve somente à demonstração. O filtro impede retornar pedidos
+  de outro ID, mas não autentica o cliente. Uma integração real deve obter a
+  identidade de um contexto autenticado. O futuro agente não poderá escolher
+  arbitrariamente esse ID. Dados pessoais e notas internas não são retornados.
+- Prazos exibidos são previsões do CSV; não representam recebimento efetivo.
+
+Os testes usam CSVs sintéticos temporários e não dependem dos dados externos,
+do Docker, de rede ou de credenciais. Cobrem validação de relações, preços,
+promoções, disponibilidade, vínculo dos pedidos e comandos CLI:
 
 ```sh
 uv run python -m unittest discover -s tests
