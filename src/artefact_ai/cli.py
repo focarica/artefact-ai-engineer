@@ -1,9 +1,10 @@
-"""Local data inspection commands; no database or LLM is required."""
+"""Local data inspection and conversational customer service commands."""
 
 from dataclasses import asdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 import json
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -83,6 +84,72 @@ def order(
         typer.echo('Pedido não encontrado para este cliente.', err=True)
         raise typer.Exit(1)
     output(asdict(result))
+
+
+@app.command()
+def chat(
+    message: Annotated[str | None, typer.Option('--message', '-m', help='Envie uma mensagem e encerre.')] = None,
+    customer_id: Annotated[int | None, typer.Option('--customer-id', min=1, help='Cliente fixo de demonstração; não autentica.')] = None,
+    data_dir: Annotated[Path | None, typer.Option('--data-dir', envvar='DATA_DIR')] = None,
+) -> None:
+    """Converse com o assistente da loja; histórico somente em memória nesta execução."""
+    os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')
+    from httpx import HTTPError
+    from openai import APIError
+    from pydantic_ai.exceptions import AgentRunError, ModelHTTPError, UserError
+
+    from .agent import StoreContext, create_agent, create_model
+    from .chat import ChatSession
+    from .config import ChatSettings
+
+    if message is not None and not message.strip():
+        raise typer.BadParameter('A mensagem não pode estar vazia.', param_hint='--message')
+    try:
+        settings = ChatSettings.from_env()
+        session = ChatSession(
+            create_agent(create_model(settings)), StoreContext(queries(data_dir or settings.data_dir), customer_id),
+            turn_limit=settings.history_turn_limit,
+        )
+    except (ValueError, UserError) as error:
+        typer.echo(f'Configuração inválida: {error}', err=True)
+        raise typer.Exit(1) from error
+
+    def reply(text: str) -> None:
+        try:
+            response = session.respond(text)
+        except ModelHTTPError as error:
+            if error.status_code in {401, 403}:
+                detail = 'Autorize o modelo cloud com: docker compose exec ollama ollama signin'
+            elif error.status_code == 404:
+                detail = f'Prepare o modelo com: docker compose exec ollama ollama pull {settings.ollama_model}'
+            else:
+                detail = 'O provedor está indisponível ou atingiu seu limite. Tente novamente mais tarde.'
+            typer.echo(f'Não foi possível consultar o modelo. {detail}', err=True)
+            raise typer.Exit(1) from error
+        except (AgentRunError, HTTPError, APIError, TimeoutError) as error:
+            typer.echo('Não foi possível concluir a resposta. Verifique o Ollama e sua conexão e tente novamente.', err=True)
+            raise typer.Exit(1) from error
+        typer.echo(f'Empório: {response}')
+
+    try:
+        if message is not None:
+            reply(message)
+            return
+        typer.echo('Empório da Música — Sua música começa aqui! Digite /sair para encerrar.')
+        typer.echo('Histórico temporário; políticas ainda não disponíveis. Consultas usam o snapshot dos CSVs.')
+        if customer_id is not None:
+            typer.echo(f'Cliente de demonstração: {customer_id} (sem autenticação).')
+        while True:
+            try:
+                text = typer.prompt('Você', prompt_suffix=': ', default='', show_default=False).strip()
+            except EOFError:
+                break
+            if text.casefold() in {'/sair', '/exit'}:
+                break
+            if text:
+                reply(text)
+    except (KeyboardInterrupt, typer.Abort):
+        pass
 
 
 def main() -> None:
