@@ -17,6 +17,8 @@ from .queries import StoreQueries
 
 app = typer.Typer(no_args_is_help=True, help='Empório da Música: consultas ao snapshot de dados.')
 DataDirectory = Annotated[Path, typer.Option('--data-dir', help='Diretório com os CSVs.', envvar='DATA_DIR')]
+ManualPath = Annotated[Path | None, typer.Option('--manual-path', envvar='POLICY_MANUAL',
+                                               help='PDF de políticas; padrão: políticas_da_loja.pdf no diretório de dados.')]
 
 
 def queries(directory: Path) -> StoreQueries:
@@ -47,7 +49,7 @@ def show_chat_home(customer_id: int | None) -> None:
     for line in banner():
         typer.echo(line)
     centered('assistente virtual da loja', typer.colors.CYAN)
-    centered('Catálogo, instrumentos e pedidos: estou aqui para ajudar.', typer.colors.WHITE)
+    centered('Catálogo, pedidos e políticas: estou aqui para ajudar.', typer.colors.WHITE)
     centered('Sessão temporária | snapshot dos CSVs | /sair encerra', typer.colors.YELLOW)
     if customer_id is not None:
         centered(f'Cliente demo: {customer_id} (não autenticado)', typer.colors.YELLOW)
@@ -104,16 +106,36 @@ def order(
 
 
 @app.command()
+def policies(
+    query: Annotated[str, typer.Argument(help='Dúvida ou assunto a buscar no manual.')],
+    manual_path: ManualPath = None,
+    data_dir: DataDirectory = Path('../data'),
+    limit: Annotated[int, typer.Option(min=1, max=5, help='Número máximo de capítulos completos.')] = 3,
+) -> None:
+    """Inspecione os trechos do manual com seção e página, sem banco ou modelo."""
+    from .manual import ManualError, PolicyManual
+
+    try:
+        manual = PolicyManual.from_pdf(manual_path or data_dir / 'políticas_da_loja.pdf')
+        passages = manual.search(query, limit=limit)
+    except (ManualError, ValueError) as error:
+        typer.echo(f'Erro no manual: {error}', err=True)
+        raise typer.Exit(1) from error
+    output([asdict(passage) for passage in passages])
+
+
+@app.command()
 def chat(
     message: Annotated[str | None, typer.Option('--message', '-m', help='Envie uma mensagem e encerre.')] = None,
     customer_id: Annotated[int | None, typer.Option('--customer-id', min=1, help='Cliente fixo de demonstração; não autentica.')] = None,
     data_dir: Annotated[Path | None, typer.Option('--data-dir', envvar='DATA_DIR')] = None,
+    manual_path: ManualPath = None,
 ) -> None:
     """Converse com o assistente da loja; histórico somente em memória nesta execução."""
     os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')
     from httpx import HTTPError
     from openai import APIError
-    from pydantic_ai.exceptions import AgentRunError, ModelHTTPError, UserError
+    from pydantic_ai.exceptions import AgentRunError, ModelHTTPError, UnexpectedModelBehavior, UsageLimitExceeded, UserError
 
     from .agent import StoreContext, create_agent, create_model
     from .chat import ChatSession
@@ -123,8 +145,10 @@ def chat(
         raise typer.BadParameter('A mensagem não pode estar vazia.', param_hint='--message')
     try:
         settings = ChatSettings.from_env()
+        directory = data_dir or settings.data_dir
         session = ChatSession(
-            create_agent(create_model(settings)), StoreContext(queries(data_dir or settings.data_dir), customer_id),
+            create_agent(create_model(settings)),
+            StoreContext(queries(directory), customer_id, manual_path or directory / 'políticas_da_loja.pdf'),
             turn_limit=settings.history_turn_limit,
         )
     except (ValueError, UserError) as error:
@@ -142,6 +166,13 @@ def chat(
             else:
                 detail = 'O provedor está indisponível ou atingiu seu limite. Tente novamente mais tarde.'
             typer.echo(f'Não foi possível consultar o modelo. {detail}', err=True)
+            raise typer.Exit(1) from error
+        except UnexpectedModelBehavior as error:
+            typer.echo('Não consegui gerar uma resposta consistente com as fontes. '
+                       'Reformule a pergunta ou confirme a política com a equipe da loja.', err=True)
+            raise typer.Exit(1) from error
+        except UsageLimitExceeded as error:
+            typer.echo('A consulta atingiu o limite de chamadas. Tente uma pergunta mais específica.', err=True)
             raise typer.Exit(1) from error
         except (AgentRunError, HTTPError, APIError, TimeoutError) as error:
             typer.echo('Não foi possível concluir a resposta. Verifique o Ollama Cloud e sua conexão e tente novamente.', err=True)

@@ -11,30 +11,38 @@ from pydantic_ai.models.function import FunctionModel
 from artefact_ai.agent import PERSONA, StoreContext, create_agent, create_model
 from artefact_ai.config import ChatSettings
 from artefact_ai.data.store import StoreData
+from artefact_ai.manual import PolicySearchResult
 from artefact_ai.queries import StoreQueries
 from pydantic_ai.providers.ollama import OllamaProvider
 from test_data import StoreFixture
+from test_manual import write_manual_pdf
 
 
 class AgentTests(StoreFixture, unittest.TestCase):
-    def context(self, customer_id=None):
-        return StoreContext(StoreQueries(StoreData.load(self.directory)), customer_id)
+    def context(self, customer_id=None, manual_path=None):
+        return StoreContext(StoreQueries(StoreData.load(self.directory)), customer_id, manual_path)
 
-    def call_tool(self, name, arguments, customer_id=None):
+    def call_tool(self, name, arguments, customer_id=None, manual_path=None):
         returned = []
 
         def model(messages, info):
             self.assertEqual(info.instructions, PERSONA.strip())
             order_tool = next(tool for tool in info.function_tools if tool.name == 'order_summary')
             self.assertEqual(set(order_tool.parameters_json_schema['properties']), {'order_id'})
+            policy_tool = next(tool for tool in info.function_tools if tool.name == 'search_policies')
+            self.assertEqual(set(policy_tool.parameters_json_schema['properties']), {'query'})
             if len(messages) == 1:
                 return ModelResponse(parts=[ToolCallPart(name, arguments)])
             returned.extend(part.content for part in messages[-1].parts if isinstance(part, ToolReturnPart))
-            return ModelResponse(parts=[TextPart('Consulta concluída.')])
+            answer = 'Consulta concluída.'
+            if returned and isinstance(returned[-1], PolicySearchResult) and returned[-1].passages:
+                passage = returned[-1].passages[0]
+                answer += f' (Manual, seção {passage.section}, página {passage.page}.)'
+            return ModelResponse(parts=[TextPart(answer)])
 
         agent = create_agent(FunctionModel(model))
-        result = agent.run_sync('Faça a consulta.', deps=self.context(customer_id))
-        self.assertEqual(result.output, 'Consulta concluída.')
+        result = agent.run_sync('Faça a consulta.', deps=self.context(customer_id, manual_path))
+        self.assertTrue(result.output.startswith('Consulta concluída.'))
         self.assertEqual(len(returned), 1)
         return returned[0]
 
@@ -59,6 +67,134 @@ class AgentTests(StoreFixture, unittest.TestCase):
 
     def test_orders_without_session_identity_are_unavailable(self):
         self.assertIn('Não há cliente', self.call_tool('order_summary', {'order_id': 1}))
+
+    def test_policy_tool_returns_source_page_and_text(self):
+        path = self.directory / 'manual.pdf'
+        write_manual_pdf(path, ['2. Horario de Funcionamento', 'Sabado 09:00 as 13:00'])
+        result = self.call_tool('search_policies', {'query': 'horário sábado'}, manual_path=path)
+        self.assertEqual(result.status, 'ok')
+        self.assertEqual(result.passages[0].page, 1)
+        self.assertEqual(result.passages[0].source, 'manual.pdf')
+        self.assertIn('09:00', result.passages[0].text)
+
+    def test_policy_tool_distinguishes_unrelated_query_from_missing_manual(self):
+        path = self.directory / 'manual.pdf'
+        self.assertEqual(self.call_tool('search_policies', {'query': 'frete'}).status, 'unavailable')
+        self.assertEqual(self.call_tool('search_policies', {'query': 'frete'}, manual_path=path).status, 'unavailable')
+        write_manual_pdf(path, ['2. Horario de Funcionamento', 'Sabado 09:00 as 13:00'])
+        result = self.call_tool('search_policies', {'query': 'fotossintese'}, manual_path=path)
+        self.assertEqual(result.status, 'not_found')
+        self.assertEqual(result.passages, ())
+
+    def test_policy_answer_without_citation_is_retried(self):
+        path = self.directory / 'manual.pdf'
+        write_manual_pdf(path, ['2. Horario de Funcionamento', 'Sabado 09:00 as 13:00'])
+        calls = []
+
+        def model(messages, info):
+            calls.append(1)
+            if len(calls) == 1:
+                return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'horário'})])
+            answer = 'Abre às 09:00.' if len(calls) == 2 else 'Abre às 09:00 (manual, seção 2, página 1).'
+            return ModelResponse(parts=[TextPart(answer)])
+
+        result = create_agent(FunctionModel(model)).run_sync('Qual o horário?', deps=self.context(manual_path=path))
+        self.assertIn('página 1', result.output)
+        self.assertEqual(len(calls), 3)
+
+    def test_shipping_boundary_cannot_be_silently_decided(self):
+        path = self.directory / 'manual.pdf'
+        write_manual_pdf(path, ['5. Politica de Frete e Entregas',
+                               'Frete gratis acima de R$ 500,00.', 'Taxa de R$ 35 abaixo de R$ 500,00.'])
+        calls = []
+
+        def model(messages, info):
+            calls.append(1)
+            if len(calls) == 1:
+                return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'frete'})])
+            answer = ('Custa R$ 35 (manual, seção 5, página 1).' if len(calls) == 2 else
+                      'O manual não define o caso exato; confirme com a equipe (seção 5, página 1).')
+            return ModelResponse(parts=[TextPart(answer)])
+
+        result = create_agent(FunctionModel(model)).run_sync('Frete de pedido de R$ 500?', deps=self.context(manual_path=path))
+        self.assertIn('não define', result.output)
+        self.assertEqual(len(calls), 3)
+
+    def test_conflicting_contact_requires_explicit_warning(self):
+        path = self.directory / 'manual.pdf'
+        write_manual_pdf(path, ['1. Dados da Empresa', 'Telefone (67) 1111-1111',
+                               '7. Atendimento via WhatsApp', 'WhatsApp (67) 2222-2222'])
+        calls = []
+
+        def model(messages, info):
+            calls.append(1)
+            if len(calls) == 1:
+                return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'WhatsApp'})])
+            answer = ('WhatsApp: (67) 2222-2222 (seção 7, página 1).' if len(calls) == 2 else
+                      'Há telefones divergentes; confirme com a equipe (seções 1 e 7, página 1; seção 7).')
+            return ModelResponse(parts=[TextPart(answer)])
+
+        result = create_agent(FunctionModel(model)).run_sync('Qual o WhatsApp?', deps=self.context(manual_path=path))
+        self.assertIn('divergentes', result.output)
+        self.assertEqual(len(calls), 3)
+
+    def test_online_withdrawal_is_not_extended_to_physical_purchases(self):
+        path = self.directory / 'manual.pdf'
+        write_manual_pdf(path, ['4. Politica de Trocas e Devolucoes',
+                               '4.1 Direito de Arrependimento (Compras Online)',
+                               'Devolucao em ate 7 dias apos o recebimento.'])
+        calls = []
+
+        def model(messages, info):
+            calls.append(1)
+            if len(calls) == 1:
+                return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'arrependimento'})])
+            answer = ('Compra presencial também tem direito de arrependimento (seção 4, página 1).' if len(calls) == 2 else
+                      'O arrependimento cobre apenas compras online. Confirme as opções presenciais com a equipe '
+                      '(manual, seção 4, página 1).')
+            return ModelResponse(parts=[TextPart(answer)])
+
+        result = create_agent(FunctionModel(model)).run_sync('Posso devolver?', deps=self.context(manual_path=path))
+        self.assertIn('apenas compras online', result.output)
+        self.assertEqual(len(calls), 3)
+
+    def test_payment_conflict_is_not_silently_resolved(self):
+        path = self.directory / 'manual.pdf'
+        write_manual_pdf(path, ['3. Formas de Pagamento', 'Cartao de credito: parcela minima de R$ 100,00.',
+                               '3.1 Regras de Parcelamento', 'De 4x a 6x: parcela minima de R$ 80,00.'])
+        calls = []
+
+        def model(messages, info):
+            calls.append(1)
+            if len(calls) == 1:
+                return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'parcelamento'})])
+            answer = ('De 4x a 6x, mínimo R$ 80 (seção 3, página 1).' if len(calls) == 2 else
+                      'Há condições diferentes na tabela geral e nas faixas detalhadas; '
+                      'confirme com a equipe (manual, seção 3, página 1).')
+            return ModelResponse(parts=[TextPart(answer)])
+
+        result = create_agent(FunctionModel(model)).run_sync('Quais as regras de parcelamento?',
+                                                           deps=self.context(manual_path=path))
+        self.assertIn('condições diferentes', result.output)
+        self.assertEqual(len(calls), 3)
+
+    def test_persistent_ambiguity_uses_only_verified_uncertainty_not_model_claims(self):
+        path = self.directory / 'manual.pdf'
+        write_manual_pdf(path, ['5. Politica de Frete e Entregas',
+                               'Frete gratis acima de R$ 500,00.', 'Taxa de R$ 35 abaixo de R$ 500,00.'])
+
+        def model(messages, info):
+            if len(messages) == 1:
+                return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'frete'})])
+            return ModelResponse(parts=[TextPart('Você pagará R$ 35 com certeza (seção 5, página 1).')])
+
+        result = create_agent(FunctionModel(model)).run_sync('Meu pedido deu R$ 500. Qual o frete?',
+                                                           deps=self.context(manual_path=path))
+        self.assertIn('não define', result.output)
+        self.assertIn('equipe', result.output)
+        self.assertIn('página 1', result.output)
+        self.assertNotIn('pagará', result.output)
+        self.assertNotIn('R$ 35', result.output)
 
     def test_cloud_model_requires_api_key_before_connecting(self):
         settings = ChatSettings('https://ollama.com/v1', 'deepseek-v4.1-flash', self.directory)
