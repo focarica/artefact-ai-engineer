@@ -41,7 +41,7 @@ def output(value: object) -> None:
     typer.echo(json.dumps(value, ensure_ascii=False, indent=2, default=json_value))
 
 
-def show_chat_home(customer_id: int | None) -> None:
+def show_chat_home(customer_id: int | None, session_id: str | None = None) -> None:
     def centered(text: str, color: str, *, bold: bool = False) -> None:
         typer.echo(styled(text.center(WIDTH), color, bold=bold))
 
@@ -50,7 +50,10 @@ def show_chat_home(customer_id: int | None) -> None:
         typer.echo(line)
     centered('assistente virtual da loja', typer.colors.CYAN)
     centered('Catálogo, pedidos e políticas: estou aqui para ajudar.', typer.colors.WHITE)
-    centered('Sessão temporária | snapshot dos CSVs | /sair encerra', typer.colors.YELLOW)
+    if session_id:
+        centered(f'Sessão persistente: {session_id} | histórico SQLite | /sair encerra', typer.colors.YELLOW)
+    else:
+        centered('Sessão temporária | snapshot dos CSVs | /sair encerra', typer.colors.YELLOW)
     if customer_id is not None:
         centered(f'Cliente demo: {customer_id} (não autenticado)', typer.colors.YELLOW)
     typer.echo(styled('-' * WIDTH, typer.colors.BLUE))
@@ -130,8 +133,12 @@ def chat(
     customer_id: Annotated[int | None, typer.Option('--customer-id', min=1, help='Cliente fixo de demonstração; não autentica.')] = None,
     data_dir: Annotated[Path | None, typer.Option('--data-dir', envvar='DATA_DIR')] = None,
     manual_path: ManualPath = None,
+    history_db: Annotated[Path | None, typer.Option('--history-db', envvar='HISTORY_DB',
+                                                   help='Arquivo SQLite para retomar a sessão; padrão: memória.')] = None,
+    session_id: Annotated[str | None, typer.Option('--session-id',
+                                                  help='Identificador da sessão persistente; padrão: local.')] = None,
 ) -> None:
-    """Converse com o assistente da loja; histórico somente em memória nesta execução."""
+    """Converse com o assistente; histórico em memória ou em SQLite com --history-db."""
     os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')
     from httpx import HTTPError
     from openai import APIError
@@ -140,18 +147,33 @@ def chat(
     from .agent import StoreContext, create_agent, create_model
     from .chat import ChatSession
     from .config import ChatSettings
+    from .history import HistoryError, SQLiteHistory
 
     if message is not None and not message.strip():
         raise typer.BadParameter('A mensagem não pode estar vazia.', param_hint='--message')
+    history = None
     try:
         settings = ChatSettings.from_env()
         directory = data_dir or settings.data_dir
+        selected_db = history_db or settings.history_db
+        if selected_db:
+            try:
+                history = SQLiteHistory(selected_db)
+            except HistoryError as error:
+                typer.echo(f'Erro no histórico: {error}', err=True)
+                raise typer.Exit(1) from error
+            session_id = session_id or 'local'
+        elif session_id:
+            typer.echo('Informe --history-db ou HISTORY_DB para persistir a sessão.', err=True)
+            raise typer.Exit(2)
         session = ChatSession(
             create_agent(create_model(settings)),
             StoreContext(queries(directory), customer_id, manual_path or directory / 'políticas_da_loja.pdf'),
-            turn_limit=settings.history_turn_limit,
+            turn_limit=settings.history_turn_limit, history=history, session_id=session_id,
         )
     except (ValueError, UserError) as error:
+        if history is not None:
+            history.close()
         typer.echo(f'Configuração inválida: {error}', err=True)
         raise typer.Exit(1) from error
 
@@ -174,6 +196,9 @@ def chat(
         except UsageLimitExceeded as error:
             typer.echo('A consulta atingiu o limite de chamadas. Tente uma pergunta mais específica.', err=True)
             raise typer.Exit(1) from error
+        except HistoryError as error:
+            typer.echo(f'Erro no histórico: {error}', err=True)
+            raise typer.Exit(1) from error
         except (AgentRunError, HTTPError, APIError, TimeoutError) as error:
             typer.echo('Não foi possível concluir a resposta. Verifique o Ollama Cloud e sua conexão e tente novamente.', err=True)
             raise typer.Exit(1) from error
@@ -183,7 +208,7 @@ def chat(
         if message is not None:
             reply(message)
             return
-        show_chat_home(customer_id)
+        show_chat_home(customer_id, session_id if history else None)
         while True:
             try:
                 text = typer.prompt(
@@ -198,6 +223,9 @@ def chat(
                 reply(text)
     except (KeyboardInterrupt, typer.Abort):
         pass
+    finally:
+        if history is not None:
+            history.close()
 
 
 def main() -> None:

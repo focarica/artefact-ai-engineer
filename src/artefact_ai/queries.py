@@ -15,6 +15,18 @@ def normalized(text: str) -> str:
                    if not unicodedata.combining(c))
 
 
+def _category_terms(text: str) -> list[set[str]]:
+    terms = []
+    for term in normalized(text).split():
+        variants = {term}
+        if term.endswith('oes') and len(term) > 3:
+            variants.add(term[:-3] + 'ao')
+        elif term.endswith('s') and len(term) > 1:
+            variants.add(term[:-1])
+        terms.append(variants)
+    return terms
+
+
 @dataclass(frozen=True)
 class ProductOffer:
     product_id: int
@@ -89,8 +101,12 @@ class StoreQueries:
             searchable = normalized(f'{product.name} {product.description} {offer.category}')
             if not all(token in searchable for token in tokens):
                 continue
-            if category and normalized(category) not in normalized(offer.category):
-                continue
+            if category:
+                query_terms = _category_terms(category)
+                product_categories = _category_terms(offer.category)
+                if not all(any(query_term & category_term for category_term in product_categories)
+                           for query_term in query_terms):
+                    continue
             if available_only and not offer.available:
                 continue
             if max_price_brl is not None and offer.price_brl > max_price_brl:

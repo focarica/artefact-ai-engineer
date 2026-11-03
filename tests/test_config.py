@@ -1,45 +1,34 @@
 import os
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from artefact_ai.config import ChatSettings, Settings
-
-
-class SettingsTests(unittest.TestCase):
-    @patch.dict(os.environ, {"DATABASE_URL": "postgresql://user:secret@localhost/store"}, clear=True)
-    def test_password_is_not_exposed_in_repr(self):
-        settings = Settings.from_env()
-        self.assertNotIn("secret", repr(settings))
-        self.assertEqual(settings.history_turn_limit, 10)
-
-    @patch.dict(os.environ, {"DATABASE_URL": "sqlite:///history.db"}, clear=True)
-    def test_rejects_non_postgres_url(self):
-        with self.assertRaises(ValueError):
-            Settings.from_env()
-
-    @patch.dict(os.environ, {"DATABASE_URL": "postgresql://localhost/store", "HISTORY_TURN_LIMIT": "0"}, clear=True)
-    def test_rejects_empty_history_window(self):
-        with self.assertRaises(ValueError):
-            Settings.from_env()
+from artefact_ai.config import ChatSettings
 
 
 class ChatSettingsTests(unittest.TestCase):
     @patch.dict(os.environ, {}, clear=True)
     def test_defaults_do_not_require_database_or_api_key(self):
         settings = ChatSettings.from_env()
-        self.assertEqual(settings.ollama_model, 'deepseek-v4.1-flash')
+        self.assertEqual(settings.ollama_model, 'gpt-oss:120b')
         self.assertEqual(settings.ollama_base_url, 'https://ollama.com/v1')
         self.assertEqual(settings.history_turn_limit, 10)
+        self.assertIsNone(settings.history_db)
 
-    @patch.dict(os.environ, {'OLLAMA_MODEL': 'deepseek-v4.1-flash:cloud'}, clear=True)
+    @patch.dict(os.environ, {'OLLAMA_MODEL': 'gpt-oss:120b:cloud'}, clear=True)
     def test_cloud_alias_is_normalized_for_direct_api(self):
-        self.assertEqual(ChatSettings.from_env().ollama_model, 'deepseek-v4.1-flash')
+        self.assertEqual(ChatSettings.from_env().ollama_model, 'gpt-oss:120b')
 
     @patch.dict(os.environ, {'OLLAMA_API_KEY': 'private-api-key'}, clear=True)
     def test_api_key_is_not_exposed_in_repr(self):
         settings = ChatSettings.from_env()
         self.assertEqual(settings.ollama_api_key, 'private-api-key')
         self.assertNotIn('private-api-key', repr(settings))
+
+    @patch.dict(os.environ, {'HISTORY_DB': '~/artefact-history.sqlite3'}, clear=True)
+    def test_history_database_path_is_expanded(self):
+        expected = Path('~/artefact-history.sqlite3').expanduser().resolve()
+        self.assertEqual(ChatSettings.from_env().history_db, expected)
 
     @patch.dict(os.environ, {'OLLAMA_BASE_URL': 'http://ollama:11434/v1/'}, clear=True)
     def test_explicit_url_takes_precedence(self):

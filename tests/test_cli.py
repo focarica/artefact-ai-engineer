@@ -118,6 +118,35 @@ class CliTests(StoreFixture, unittest.TestCase):
             result = CliRunner().invoke(app, ['chat', '--data-dir', str(self.directory)], input='')
         self.assertEqual(result.exit_code, 0, result.output)
 
+    def test_session_id_requires_a_history_database(self):
+        def model(messages, info):
+            self.fail('Configuration must fail before the model is called')
+
+        with patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
+            result = self.invoke('chat', '--session-id', 'demo', '--message', 'Olá')
+        self.assertEqual(result.exit_code, 2, result.output)
+        self.assertIn('--history-db', result.output)
+
+    def test_chat_persists_and_resumes_a_sqlite_session(self):
+        histories = []
+
+        def model(messages, info):
+            histories.append([part.content for message in messages for part in message.parts
+                              if isinstance(part, UserPromptPart)])
+            return ModelResponse(parts=[TextPart('Oi! Como posso ajudar?')])
+
+        database = self.directory / 'history.sqlite3'
+        with patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
+            first = self.invoke('chat', '--history-db', str(database), '--session-id', 'demo',
+                                '--message', 'Olá')
+            second = self.invoke('chat', '--history-db', str(database), '--session-id', 'demo',
+                                 '--message', 'Tudo bem?')
+        self.assertEqual(first.exit_code, 0, first.output)
+        self.assertEqual(second.exit_code, 0, second.output)
+        self.assertTrue(database.exists())
+        self.assertEqual(histories[0], ['Olá'])
+        self.assertEqual(histories[-1], ['Olá', 'Tudo bem?'])
+
     def test_empty_chat_message_is_usage_error(self):
         with patch('artefact_ai.agent.create_model') as model:
             result = self.invoke('chat', '--message', '   ')

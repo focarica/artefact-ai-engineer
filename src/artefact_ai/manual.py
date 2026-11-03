@@ -21,21 +21,25 @@ from .queries import normalized
 
 STOP_WORDS = frozenset('a ao aos as ate com como da das de do dos e em eu me meu minha na nas no nos '
                        'o os ou para pela pelo por qual quais que se seu sua um uma voces loja manual '
-                       'politica politicas gostaria quero saber posso rs'.split())
+                       'politica politicas gostaria quero saber posso rs esta estao sao'.split())
 CONCEPTS = (
-    'devolucao devolucoes devolver devolvo devolve arrependi arrependimento reembolso',
+    'devolucao devolucoes devolver devolvo devolve arrependi arrependimento reembolso dinheiro desistir desisti',
     'troca trocas trocar troco',
-    'horario horarios funcionamento funciona aberto abre abertura fecha fechamento',
-    'endereco localizacao onde fica localizada',
+    'horario horarios hora horas funcionamento funciona aberto abre abertura fecha fechamento '
+    'visita visitar visito',
+    'endereco localizacao localizada onde fica chego chegar chega chegada caminho',
     'parcelamento parcelar parcelas parcela vezes',
-    'frete entrega entregas envio envios enviar',
+    'frete entrega entregas encomenda encomendas envio envios enviar avaria avariado avariada',
     'garantia garantias',
     'defeito defeitos defeituoso quebrado',
     'pagamento pagamentos pagar pago',
     'telefone telefones contato contatos whatsapp zap',
+    'privacidade lgpd marketing propaganda parceiro parceiros parceira terceiros terceiro '
+    'compartilhamento compartilhados email mail',
 )
 ALIASES = {word: group.split()[0] for group in CONCEPTS for word in group.split()}
 CHAPTER = re.compile(r'^(\d{1,2})\.\s+([^\d\W].*)$')
+COVER = 'Capa e identificação'
 FOOTER = re.compile(r'^Página\s+\d+$', re.IGNORECASE)
 
 
@@ -100,7 +104,7 @@ class PolicyManual:
     @classmethod
     def from_pages(cls, pages: list[str], *, source: str) -> 'PolicyManual':
         passages = []
-        section = 'Capa e identificação'
+        section = COVER
         for number, page in enumerate(pages, 1):
             lines: list[str] = []
 
@@ -156,8 +160,11 @@ class PolicyManual:
                        if (label := re.match(r'^([a-z0-9]+)(?:\s|:)', normalized(line)))):
                     score += 2 * weight
             if score:
+                # The cover repeats contact data already detailed in chapters 1 and 7.
+                # Prefer the numbered chapter that states the complete rule.
                 ranked.append((section, score))
-        selected = sorted(ranked, key=lambda item: -item[1])[:limit]
+        numbered = [item for item in ranked if item[0] != COVER]
+        selected = sorted(numbered or ranked, key=lambda item: -item[1])[:limit]
         return tuple(passage for section, _ in selected for passage in self._chapters[section])
 
     @staticmethod

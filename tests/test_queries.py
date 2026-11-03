@@ -31,6 +31,11 @@ class QueryTests(StoreFixture, unittest.TestCase):
         self.assertEqual(len(queries.search_products('VIOLAO', max_price_brl=Decimal('900'))), 1)
         self.assertEqual(queries.search_products(max_price_brl=Decimal('899')), [])
 
+    def test_category_filter_matches_singular_and_plural(self):
+        queries = self.queries()
+        self.assertEqual(len(queries.search_products(category='violão')), 1)
+        self.assertEqual(len(queries.search_products(category='violões')), 1)
+
     def test_unavailable_products_are_not_recommended(self):
         queries = self.queries()
         queries.data.products[1] = replace(queries.data.products[1], stock_quantity=0)

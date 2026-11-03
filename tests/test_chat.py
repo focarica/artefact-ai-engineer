@@ -1,3 +1,5 @@
+from pathlib import Path
+import tempfile
 import unittest
 
 from pydantic_ai.exceptions import UsageLimitExceeded
@@ -7,6 +9,7 @@ from pydantic_ai.models.function import FunctionModel
 from artefact_ai.agent import StoreContext, create_agent
 from artefact_ai.chat import ChatSession
 from artefact_ai.data.store import StoreData
+from artefact_ai.history import SQLiteHistory
 from artefact_ai.queries import StoreQueries
 from test_data import StoreFixture
 
@@ -35,6 +38,59 @@ class ChatSessionTests(StoreFixture, unittest.TestCase):
         prompts = [part.content for message in requests[-1] for part in message.parts
                    if isinstance(part, UserPromptPart)]
         self.assertEqual(prompts, ['E no PIX?', 'Obrigado'])
+
+    def test_sqlite_history_resumes_a_session(self):
+        requests = []
+
+        def model(messages, info):
+            requests.append(list(messages))
+            return ModelResponse(parts=[TextPart('Oi!')])
+
+        agent = create_agent(FunctionModel(model))
+        context = StoreContext(StoreQueries(StoreData.load(self.directory)))
+        with tempfile.TemporaryDirectory() as directory:
+            history = SQLiteHistory(Path(directory) / 'history.sqlite3')
+            first = ChatSession(agent, context, history=history, session_id='demo', turn_limit=2)
+            first.respond('Olá')
+            second = ChatSession(agent, context, history=history, session_id='demo', turn_limit=2)
+            second.respond('Tudo bem?')
+            prompts = [part.content for message in requests[-1] for part in message.parts
+                       if isinstance(part, UserPromptPart)]
+            self.assertEqual(prompts, ['Olá', 'Tudo bem?'])
+            history.close()
+
+    def test_sqlite_history_is_scoped_to_customer_context(self):
+        requests = []
+
+        def model(messages, info):
+            requests.append(list(messages))
+            return ModelResponse(parts=[TextPart('Oi!')])
+
+        agent = create_agent(FunctionModel(model))
+        with tempfile.TemporaryDirectory() as directory:
+            history = SQLiteHistory(Path(directory) / 'history.sqlite3')
+            customer_a = StoreContext(StoreQueries(StoreData.load(self.directory)), 1)
+            customer_b = StoreContext(StoreQueries(StoreData.load(self.directory)), 2)
+            ChatSession(agent, customer_a, history=history, session_id='same-id').respond('Pedido A')
+            ChatSession(agent, customer_b, history=history, session_id='same-id').respond('Pedido B')
+            prompts = [part.content for message in requests[-1] for part in message.parts
+                       if isinstance(part, UserPromptPart)]
+            self.assertEqual(prompts, ['Pedido B'])
+            history.close()
+
+    def context(self):
+        return StoreContext(StoreQueries(StoreData.load(self.directory)))
+
+    def test_history_requires_a_session_identifier(self):
+        with tempfile.TemporaryDirectory() as directory:
+            history = SQLiteHistory(Path(directory) / 'history.sqlite3')
+            with self.assertRaises(ValueError):
+                ChatSession(create_agent(FunctionModel(lambda messages, info: None)), self.context(),
+                            history=history)
+            with self.assertRaises(ValueError):
+                ChatSession(create_agent(FunctionModel(lambda messages, info: None)), self.context(),
+                            history=history, session_id='x' * 129)
+            history.close()
 
     def test_failed_turn_is_not_added_to_history(self):
         requests = []

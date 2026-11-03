@@ -34,6 +34,7 @@ Instrumentos com personalização e produtos com aviso de venda final.
 5.1 Entregas locais
 Frete grátis acima de R$ 500 e taxa de R$ 35 abaixo de R$ 500.
 5.2 Entregas para Outras Cidades
+Em caso de avaria, o cliente deve recusar o recebimento.
 Página 2''',
     '''Empório da Música Manual de Políticas e Procedimentos
 PAC entrega em 5 a 12 dias úteis. SEDEX em 2 a 5 dias úteis.
@@ -46,6 +47,7 @@ Página 3''',
     '''9. Privacidade e Proteção de Dados
 Os dados pessoais (nome, telefone, e-mail,
 endereço) são utilizados exclusivamente para processamento e entrega de pedidos.
+Dados não são compartilhados com parceiros para marketing.
 Página 4''',
 ]
 
@@ -96,6 +98,19 @@ class ManualTests(unittest.TestCase):
     def test_accents_and_paraphrases_are_normalized(self):
         passages = self.manual.search('Que horas abre no sabado?', limit=1)
         self.assertEqual(passages[0].section, '2. Horário de Funcionamento')
+
+    def test_colloquial_questions_retrieve_the_expected_chapter(self):
+        cases = [
+            ('Como chego até vocês?', '1. Sobre a Empório da Música'),
+            ('Vocês estão em qual rua?', '1. Sobre a Empório da Música'),
+            ('Até que horas posso visitar vocês?', '2. Horário de Funcionamento'),
+            ('A encomenda chegou avariada, o que faço?', '5. Política de Frete e Entregas'),
+            ('Pode mandar meu email para parceiros fazerem propaganda?', '9. Privacidade e Proteção de Dados'),
+            ('Não gostei do instrumento e quero meu dinheiro de volta', '4. Política de Trocas e Devoluções'),
+        ]
+        for question, section in cases:
+            with self.subTest(question=question):
+                self.assertEqual(self.manual.search(question, limit=1)[0].section, section)
 
     def test_return_rule_includes_exclusions(self):
         passage = self.manual.search('Me arrependi, posso devolver?', limit=1)[0]

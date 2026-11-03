@@ -14,33 +14,15 @@ def history_turn_limit() -> int:
 
 
 @dataclass(frozen=True)
-class Settings:
-    database_url: str = field(repr=False)
-    data_dir: Path
-    history_turn_limit: int = 10
-
-    @classmethod
-    def from_env(cls) -> "Settings":
-        database_url = os.environ.get("DATABASE_URL", "")
-        parsed = urlsplit(database_url)
-        if parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname:
-            raise ValueError("DATABASE_URL must be a PostgreSQL connection URL")
-        if not parsed.path.strip("/"):
-            raise ValueError("DATABASE_URL must include a database name")
-        limit = history_turn_limit()
-        data_dir = Path(os.environ.get("DATA_DIR", "../data")).expanduser().resolve()
-        return cls(database_url=database_url, data_dir=data_dir, history_turn_limit=limit)
-
-
-@dataclass(frozen=True)
 class ChatSettings:
-    """Chat uses Ollama Cloud and CSVs without requiring a database connection."""
+    """Chat uses Ollama Cloud and CSVs; SQLite history is optional."""
 
     ollama_base_url: str
     ollama_model: str
     data_dir: Path
     history_turn_limit: int = 10
     ollama_api_key: str = field(default='', repr=False)
+    history_db: Path | None = None
 
     @classmethod
     def from_env(cls) -> "ChatSettings":
@@ -52,10 +34,17 @@ class ChatSettings:
             raise ValueError("OLLAMA_BASE_URL must end in /v1 without credentials, query or fragment")
         # Accessing port also validates malformed or out-of-range ports.
         parsed.port
-        model = os.environ.get("OLLAMA_MODEL", "deepseek-v4.1-flash").strip()
+        model = os.environ.get("OLLAMA_MODEL", "gpt-oss:120b").strip()
         if not model:
             raise ValueError("OLLAMA_MODEL must not be empty")
         if parsed.hostname == 'ollama.com':
             model = model.removesuffix(':cloud')
-        return cls(base_url, model, Path(os.environ.get("DATA_DIR", "../data")).expanduser().resolve(),
-                   history_turn_limit(), os.environ.get('OLLAMA_API_KEY', '').strip())
+        history_db = os.environ.get("HISTORY_DB", "").strip()
+        return cls(
+            base_url,
+            model,
+            Path(os.environ.get("DATA_DIR", "../data")).expanduser().resolve(),
+            history_turn_limit(),
+            os.environ.get('OLLAMA_API_KEY', '').strip(),
+            Path(history_db).expanduser().resolve() if history_db else None,
+        )
