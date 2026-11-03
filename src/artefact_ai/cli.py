@@ -11,6 +11,7 @@ from typing import Annotated
 import typer
 from dotenv import load_dotenv
 
+from .banner import WIDTH, banner, styled
 from .data.store import DataError, StoreData
 from .queries import StoreQueries
 
@@ -36,6 +37,21 @@ def json_value(value: object) -> str:
 
 def output(value: object) -> None:
     typer.echo(json.dumps(value, ensure_ascii=False, indent=2, default=json_value))
+
+
+def show_chat_home(customer_id: int | None) -> None:
+    def centered(text: str, color: str, *, bold: bool = False) -> None:
+        typer.echo(styled(text.center(WIDTH), color, bold=bold))
+
+    centered('EMPÓRIO DA MÚSICA', typer.colors.BRIGHT_CYAN, bold=True)
+    for line in banner():
+        typer.echo(line)
+    centered('assistente virtual da loja', typer.colors.CYAN)
+    centered('Catálogo, instrumentos e pedidos: estou aqui para ajudar.', typer.colors.WHITE)
+    centered('Sessão temporária | snapshot dos CSVs | /sair encerra', typer.colors.YELLOW)
+    if customer_id is not None:
+        centered(f'Cliente demo: {customer_id} (não autenticado)', typer.colors.YELLOW)
+    typer.echo(styled('-' * WIDTH, typer.colors.BLUE))
 
 
 @app.command()
@@ -130,19 +146,19 @@ def chat(
         except (AgentRunError, HTTPError, APIError, TimeoutError) as error:
             typer.echo('Não foi possível concluir a resposta. Verifique o Ollama Cloud e sua conexão e tente novamente.', err=True)
             raise typer.Exit(1) from error
-        typer.echo(f'Empório: {response}')
+        typer.echo(styled(f'\n  ♫ Empório: {response}\n', typer.colors.BRIGHT_GREEN))
 
     try:
         if message is not None:
             reply(message)
             return
-        typer.echo('Empório da Música — Sua música começa aqui! Digite /sair para encerrar.')
-        typer.echo('Histórico temporário; políticas ainda não disponíveis. Consultas usam o snapshot dos CSVs.')
-        if customer_id is not None:
-            typer.echo(f'Cliente de demonstração: {customer_id} (sem autenticação).')
+        show_chat_home(customer_id)
         while True:
             try:
-                text = typer.prompt('Você', prompt_suffix=': ', default='', show_default=False).strip()
+                text = typer.prompt(
+                    styled('  Você', typer.colors.BRIGHT_MAGENTA, bold=True),
+                    prompt_suffix=' › ', default='', show_default=False,
+                ).strip()
             except EOFError:
                 break
             if text.casefold() in {'/sair', '/exit'}:
