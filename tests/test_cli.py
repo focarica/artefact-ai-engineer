@@ -5,13 +5,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from pydantic_ai.exceptions import ModelHTTPError
-from pydantic_ai.messages import ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from pydantic_ai.models.function import FunctionModel
 from typer.testing import CliRunner
 
 from artefact_ai.cli import app
 from test_data import StoreFixture
+from test_manual import write_manual_pdf
 
 
 class CliTests(StoreFixture, unittest.TestCase):
@@ -36,6 +37,53 @@ class CliTests(StoreFixture, unittest.TestCase):
         result = CliRunner().invoke(app, ['catalog', '--data-dir', str(self.directory / 'missing')])
         self.assertEqual(result.exit_code, 1)
         self.assertIn('Erro nos dados', result.output)
+
+    def test_policies_command_does_not_require_csvs_or_model(self):
+        path = self.directory / 'políticas_da_loja.pdf'
+        write_manual_pdf(path, ['2. Horario de Funcionamento', 'Sabado 09:00 as 13:00'])
+        result = CliRunner().invoke(app, ['policies', 'horário', '--manual-path', str(path),
+                                        '--data-dir', str(self.directory / 'missing-csvs')])
+        self.assertEqual(result.exit_code, 0, result.output)
+        passage = json.loads(result.output)[0]
+        self.assertEqual(passage['page'], 1)
+        self.assertIn('09:00', passage['text'])
+
+    def test_policies_missing_pdf_is_actionable(self):
+        result = self.invoke('policies', 'frete')
+        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertIn('Erro no manual', result.output)
+
+    def test_chat_uses_policy_pdf_from_selected_data_directory(self):
+        write_manual_pdf(self.directory / 'políticas_da_loja.pdf',
+                         ['2. Horario de Funcionamento', 'Sabado 09:00 as 13:00'])
+        returns = []
+
+        def model(messages, info):
+            if len(messages) == 1:
+                return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'horário sábado'})])
+            returns.extend(part.content for part in messages[-1].parts if isinstance(part, ToolReturnPart))
+            return ModelResponse(parts=[TextPart('Sábado: 09:00 às 13:00 (manual, seção 2, p. 1).')])
+
+        with patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
+            result = self.invoke('chat', '--message', 'Vocês abrem no sábado?')
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(returns[0].status, 'ok')
+        self.assertIn('p. 1', result.output)
+
+    def test_chat_policy_path_can_be_overridden(self):
+        custom = self.directory / 'custom.pdf'
+        write_manual_pdf(custom, ['2. Horario de Funcionamento', 'Sabado 10:00 as 12:00'])
+
+        def model(messages, info):
+            if len(messages) == 1:
+                return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'horário'})])
+            returned = next(p.content for p in messages[-1].parts if isinstance(p, ToolReturnPart))
+            self.assertEqual(returned.passages[0].source, 'custom.pdf')
+            return ModelResponse(parts=[TextPart('Sábado: 10:00 às 12:00 (manual, seção 2, página 1).')])
+
+        with patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
+            result = self.invoke('chat', '--manual-path', str(custom), '--message', 'Qual o horário?')
+        self.assertEqual(result.exit_code, 0, result.output)
 
     @patch.dict(os.environ, {}, clear=True)
     def test_chat_single_message_works_without_database(self):
@@ -94,6 +142,17 @@ class CliTests(StoreFixture, unittest.TestCase):
             result = self.invoke('chat', '--message', 'Olá')
         self.assertEqual(result.exit_code, 1, result.output)
         self.assertIn('Verifique o Ollama', result.output)
+        self.assertNotIn('private details', result.output)
+
+    def test_unreliable_answer_is_not_reported_as_connection_error(self):
+        def model(messages, info):
+            raise UnexpectedModelBehavior('private details')
+
+        with patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
+            result = self.invoke('chat', '--message', 'Qual o frete?')
+        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertIn('consistente com as fontes', result.output)
+        self.assertNotIn('sua conexão', result.output)
         self.assertNotIn('private details', result.output)
 
     @patch.dict(os.environ, {'OLLAMA_BASE_URL': 'invalid'}, clear=True)
