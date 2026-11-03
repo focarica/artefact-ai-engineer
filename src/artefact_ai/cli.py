@@ -134,11 +134,12 @@ def chat(
     data_dir: Annotated[Path | None, typer.Option('--data-dir', envvar='DATA_DIR')] = None,
     manual_path: ManualPath = None,
     history_db: Annotated[Path | None, typer.Option('--history-db', envvar='HISTORY_DB',
-                                                   help='Arquivo SQLite para retomar a sessão; padrão: memória.')] = None,
+                                                   help='Arquivo SQLite; padrão: ./artefact_history.sqlite3.')] = None,
     session_id: Annotated[str | None, typer.Option('--session-id',
                                                   help='Identificador da sessão persistente; padrão: local.')] = None,
+    no_history: Annotated[bool, typer.Option('--no-history', help='Não persista a conversa em SQLite.')] = False,
 ) -> None:
-    """Converse com o assistente; histórico em memória ou em SQLite com --history-db."""
+    """Converse com o assistente; o histórico é persistido em SQLite por padrão."""
     os.environ.setdefault('PYDANTIC_AI_NO_BANNER', '1')
     from httpx import HTTPError
     from openai import APIError
@@ -155,7 +156,7 @@ def chat(
     try:
         settings = ChatSettings.from_env()
         directory = data_dir or settings.data_dir
-        selected_db = history_db or settings.history_db
+        selected_db = None if no_history else (history_db or settings.history_db)
         if selected_db:
             try:
                 history = SQLiteHistory(selected_db)
@@ -163,9 +164,6 @@ def chat(
                 typer.echo(f'Erro no histórico: {error}', err=True)
                 raise typer.Exit(1) from error
             session_id = session_id or 'local'
-        elif session_id:
-            typer.echo('Informe --history-db ou HISTORY_DB para persistir a sessão.', err=True)
-            raise typer.Exit(2)
         session = ChatSession(
             create_agent(create_model(settings)),
             StoreContext(queries(directory), customer_id, manual_path or directory / 'políticas_da_loja.pdf'),

@@ -15,7 +15,7 @@ def history_turn_limit() -> int:
 
 @dataclass(frozen=True)
 class ChatSettings:
-    """Chat uses Ollama Cloud and CSVs; SQLite history is optional."""
+    """Chat uses Ollama Cloud and CSVs; history is SQLite-backed by default."""
 
     ollama_base_url: str
     ollama_model: str
@@ -39,12 +39,13 @@ class ChatSettings:
             raise ValueError("OLLAMA_MODEL must not be empty")
         if parsed.hostname == 'ollama.com':
             model = model.removesuffix(':cloud')
-        history_db = os.environ.get("HISTORY_DB", "").strip()
+        history_value = os.environ.get("HISTORY_DB", "./artefact_history.sqlite3").strip()
+        history_db = Path(history_value).expanduser().resolve() if history_value else None
         return cls(
             base_url,
             model,
             Path(os.environ.get("DATA_DIR", "../data")).expanduser().resolve(),
             history_turn_limit(),
             os.environ.get('OLLAMA_API_KEY', '').strip(),
-            Path(history_db).expanduser().resolve() if history_db else None,
+            history_db,
         )

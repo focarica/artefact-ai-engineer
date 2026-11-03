@@ -8,12 +8,16 @@ from artefact_ai.config import ChatSettings
 
 class ChatSettingsTests(unittest.TestCase):
     @patch.dict(os.environ, {}, clear=True)
-    def test_defaults_do_not_require_database_or_api_key(self):
+    def test_defaults_use_local_sqlite_without_requiring_api_key(self):
         settings = ChatSettings.from_env()
         self.assertEqual(settings.ollama_model, 'gpt-oss:120b')
         self.assertEqual(settings.ollama_base_url, 'https://ollama.com/v1')
         self.assertEqual(settings.history_turn_limit, 10)
-        self.assertIsNone(settings.history_db)
+        self.assertEqual(settings.history_db, Path('./artefact_history.sqlite3').resolve())
+
+    @patch.dict(os.environ, {'HISTORY_DB': ''}, clear=True)
+    def test_empty_history_db_disables_persistence(self):
+        self.assertIsNone(ChatSettings.from_env().history_db)
 
     @patch.dict(os.environ, {'OLLAMA_MODEL': 'gpt-oss:120b:cloud'}, clear=True)
     def test_cloud_alias_is_normalized_for_direct_api(self):

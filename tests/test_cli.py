@@ -17,6 +17,9 @@ from test_manual import write_manual_pdf
 
 class CliTests(StoreFixture, unittest.TestCase):
     def invoke(self, *arguments):
+        arguments = list(arguments)
+        if arguments and arguments[0] == 'chat' and '--history-db' not in arguments and '--no-history' not in arguments:
+            arguments.append('--no-history')
         return CliRunner().invoke(app, [*arguments, '--data-dir', str(self.directory)])
 
     def test_catalog_works_without_database_or_model(self):
@@ -105,7 +108,7 @@ class CliTests(StoreFixture, unittest.TestCase):
             return ModelResponse(parts=[TextPart('Posso ajudar!')])
 
         with patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
-            result = CliRunner().invoke(app, ['chat', '--data-dir', str(self.directory)],
+            result = CliRunner().invoke(app, ['chat', '--no-history', '--data-dir', str(self.directory)],
                                         input='\nOlá\nQuero um violão\n/sair\n')
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(prompts, [['Olá'], ['Olá', 'Quero um violão']])
@@ -115,17 +118,19 @@ class CliTests(StoreFixture, unittest.TestCase):
             self.fail('EOF must not reach the model')
 
         with patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
-            result = CliRunner().invoke(app, ['chat', '--data-dir', str(self.directory)], input='')
+            result = CliRunner().invoke(app, ['chat', '--no-history', '--data-dir', str(self.directory)], input='')
         self.assertEqual(result.exit_code, 0, result.output)
 
-    def test_session_id_requires_a_history_database(self):
+    def test_configured_history_database_is_used_by_default(self):
         def model(messages, info):
-            self.fail('Configuration must fail before the model is called')
+            return ModelResponse(parts=[TextPart('Oi!')])
 
-        with patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
-            result = self.invoke('chat', '--session-id', 'demo', '--message', 'Olá')
-        self.assertEqual(result.exit_code, 2, result.output)
-        self.assertIn('--history-db', result.output)
+        database = self.directory / 'default-history.sqlite3'
+        with patch.dict(os.environ, {'HISTORY_DB': str(database)}), \
+             patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
+            result = CliRunner().invoke(app, ['chat', '--data-dir', str(self.directory), '--message', 'Olá'])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertTrue(database.exists())
 
     def test_chat_persists_and_resumes_a_sqlite_session(self):
         histories = []

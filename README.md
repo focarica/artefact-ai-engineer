@@ -29,7 +29,7 @@ português alinhadas ao tom da loja.
   continuações entre páginas juntas.
 - **CSV como snapshot**: os dados operacionais são carregados a cada execução.
   Não há integração com estoque ou pedidos em tempo real.
-- **Histórico em memória por padrão**, com opção de persistência em **SQLite**.
+- **Histórico persistido em SQLite por padrão**, com opção de usar apenas memória.
   Não há PostgreSQL, Docker ou pgvector.
 - **Typer** para a CLI.
 
@@ -83,7 +83,7 @@ DATA_DIR=../data
 | `OLLAMA_MODEL` | Modelo usado no chat. O sufixo `:cloud` é removido. | `gpt-oss:120b` |
 | `DATA_DIR` | Diretório dos CSVs e do PDF. | `../data` |
 | `HISTORY_TURN_LIMIT` | Turnos completos mantidos/carregados. | `10` |
-| `HISTORY_DB` | Arquivo SQLite opcional para persistir o histórico. | desativado |
+| `HISTORY_DB` | Arquivo SQLite com sessões e turnos completos. | `./artefact_history.sqlite3` |
 
 O `.env` é carregado automaticamente pela CLI. Variáveis já presentes no
 ambiente têm precedência.
@@ -107,11 +107,12 @@ uv run artefact-ai chat --message 'Quanto custa o Takamine GD20?'
 uv run artefact-ai chat --customer-id 3
 ```
 
-No chat interativo, `/sair` encerra. O histórico da execução fica em memória.
+No chat interativo, `/sair` encerra. Por padrão, os turnos são salvos em
+`./artefact_history.sqlite3` e retomados na próxima execução.
 
 ### Histórico persistente em SQLite
 
-Para retomar uma conversa em outro processo:
+Para escolher o arquivo e retomar uma sessão em outro processo:
 
 ```sh
 uv run artefact-ai chat \
@@ -120,9 +121,11 @@ uv run artefact-ai chat \
 ```
 
 Ou defina `HISTORY_DB` no `.env`. Sem `--session-id`, a sessão persistente usa
-`local`. O arquivo guarda turnos completos, incluindo chamadas e resultados de
-ferramentas; `HISTORY_TURN_LIMIT` limita quantos turnos são carregados e mantidos.
-O arquivo é local, contém dados da conversa e não deve ser versionado.
+`local`; sessões são separadas por cliente demonstrativo para não misturar o
+contexto de pedidos. O SQLite guarda sessões e turnos completos, incluindo
+chamadas e resultados de ferramentas; `HISTORY_TURN_LIMIT` limita quantos turnos
+são carregados e mantidos por sessão. O arquivo é local, contém dados da conversa
+e não deve ser versionado. Use `--no-history` para uma execução somente em memória.
 
 ### Consultas diretas, sem modelo
 
