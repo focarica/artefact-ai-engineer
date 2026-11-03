@@ -6,6 +6,13 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+def history_turn_limit() -> int:
+    limit = int(os.environ.get("HISTORY_TURN_LIMIT", "10"))
+    if limit < 1:
+        raise ValueError("HISTORY_TURN_LIMIT must be positive")
+    return limit
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = field(repr=False)
@@ -20,8 +27,33 @@ class Settings:
             raise ValueError("DATABASE_URL must be a PostgreSQL connection URL")
         if not parsed.path.strip("/"):
             raise ValueError("DATABASE_URL must include a database name")
-        limit = int(os.environ.get("HISTORY_TURN_LIMIT", "10"))
-        if limit < 1:
-            raise ValueError("HISTORY_TURN_LIMIT must be positive")
+        limit = history_turn_limit()
         data_dir = Path(os.environ.get("DATA_DIR", "../data")).expanduser().resolve()
         return cls(database_url=database_url, data_dir=data_dir, history_turn_limit=limit)
+
+
+@dataclass(frozen=True)
+class ChatSettings:
+    """Chat uses Ollama and CSVs without requiring a database connection."""
+
+    ollama_base_url: str
+    ollama_model: str
+    data_dir: Path
+    history_turn_limit: int = 10
+
+    @classmethod
+    def from_env(cls) -> "ChatSettings":
+        port = os.environ.get("OLLAMA_PORT", "11434")
+        base_url = os.environ.get("OLLAMA_BASE_URL", f"http://localhost:{port}/v1").strip().rstrip("/")
+        parsed = urlsplit(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("OLLAMA_BASE_URL must be an HTTP(S) URL ending in /v1")
+        if parsed.path != "/v1" or parsed.query or parsed.fragment or parsed.username or parsed.password:
+            raise ValueError("OLLAMA_BASE_URL must end in /v1 without credentials, query or fragment")
+        # Accessing port also validates malformed or out-of-range ports.
+        parsed.port
+        model = os.environ.get("OLLAMA_MODEL", "deepseek-v4.1-flash:cloud").strip()
+        if not model:
+            raise ValueError("OLLAMA_MODEL must not be empty")
+        return cls(base_url, model, Path(os.environ.get("DATA_DIR", "../data")).expanduser().resolve(),
+                   history_turn_limit())
