@@ -7,7 +7,7 @@ from decimal import Decimal
 from artefact_ai.data.store import DataError, StoreData
 
 
-class StoreTests(unittest.TestCase):
+class StoreFixture:
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -28,6 +28,8 @@ class StoreTests(unittest.TestCase):
             writer.writerow(header.split(','))
             writer.writerows(rows)
 
+
+class StoreTests(StoreFixture, unittest.TestCase):
     def test_preserves_decimal_prices_and_missing_delivery(self):
         store = StoreData.load(self.directory)
         self.assertEqual(store.products[1].price_brl, Decimal('999.90'))

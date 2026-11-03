@@ -1,13 +1,14 @@
+import unittest
 from dataclasses import replace
 from decimal import Decimal
 
 from artefact_ai.queries import StoreQueries
 from artefact_ai.data.models import Promotion
 from artefact_ai.data.store import StoreData
-from test_data import StoreTests
+from test_data import StoreFixture
 
 
-class QueryTests(StoreTests):
+class QueryTests(StoreFixture, unittest.TestCase):
     def queries(self):
         return StoreQueries(StoreData.load(self.directory))
 
