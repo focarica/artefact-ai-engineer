@@ -27,13 +27,19 @@ class ChatSettingsTests(unittest.TestCase):
     @patch.dict(os.environ, {}, clear=True)
     def test_defaults_do_not_require_database_or_api_key(self):
         settings = ChatSettings.from_env()
-        self.assertEqual(settings.ollama_model, 'deepseek-v4.1-flash:cloud')
-        self.assertEqual(settings.ollama_base_url, 'http://localhost:11434/v1')
+        self.assertEqual(settings.ollama_model, 'deepseek-v4.1-flash')
+        self.assertEqual(settings.ollama_base_url, 'https://ollama.com/v1')
         self.assertEqual(settings.history_turn_limit, 10)
 
-    @patch.dict(os.environ, {'OLLAMA_PORT': '11435'}, clear=True)
-    def test_port_override_matches_compose(self):
-        self.assertEqual(ChatSettings.from_env().ollama_base_url, 'http://localhost:11435/v1')
+    @patch.dict(os.environ, {'OLLAMA_MODEL': 'deepseek-v4.1-flash:cloud'}, clear=True)
+    def test_cloud_alias_is_normalized_for_direct_api(self):
+        self.assertEqual(ChatSettings.from_env().ollama_model, 'deepseek-v4.1-flash')
+
+    @patch.dict(os.environ, {'OLLAMA_API_KEY': 'private-api-key'}, clear=True)
+    def test_api_key_is_not_exposed_in_repr(self):
+        settings = ChatSettings.from_env()
+        self.assertEqual(settings.ollama_api_key, 'private-api-key')
+        self.assertNotIn('private-api-key', repr(settings))
 
     @patch.dict(os.environ, {'OLLAMA_BASE_URL': 'http://ollama:11434/v1/'}, clear=True)
     def test_explicit_url_takes_precedence(self):

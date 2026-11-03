@@ -61,9 +61,11 @@ class StoreContext:
 
 
 def create_model(settings: ChatSettings) -> OpenAIChatModel:
+    if not settings.ollama_api_key:
+        raise ValueError('Defina OLLAMA_API_KEY no .env ou no ambiente. Crie uma chave em https://ollama.com/settings/keys')
     return OpenAIChatModel(
         settings.ollama_model,
-        provider=OllamaProvider(base_url=settings.ollama_base_url),
+        provider=OllamaProvider(base_url=settings.ollama_base_url, api_key=settings.ollama_api_key),
         settings={'timeout': 120, 'max_retries': 0},
     )
 

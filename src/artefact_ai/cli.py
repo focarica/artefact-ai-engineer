@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from dotenv import load_dotenv
 
 from .data.store import DataError, StoreData
 from .queries import StoreQueries
@@ -119,15 +120,15 @@ def chat(
             response = session.respond(text)
         except ModelHTTPError as error:
             if error.status_code in {401, 403}:
-                detail = 'Autorize o modelo cloud com: docker compose exec ollama ollama signin'
+                detail = 'Verifique OLLAMA_API_KEY e o acesso ao modelo em https://ollama.com/settings/keys'
             elif error.status_code == 404:
-                detail = f'Prepare o modelo com: docker compose exec ollama ollama pull {settings.ollama_model}'
+                detail = f'Verifique se o modelo {settings.ollama_model} está disponível no Ollama Cloud.'
             else:
                 detail = 'O provedor está indisponível ou atingiu seu limite. Tente novamente mais tarde.'
             typer.echo(f'Não foi possível consultar o modelo. {detail}', err=True)
             raise typer.Exit(1) from error
         except (AgentRunError, HTTPError, APIError, TimeoutError) as error:
-            typer.echo('Não foi possível concluir a resposta. Verifique o Ollama e sua conexão e tente novamente.', err=True)
+            typer.echo('Não foi possível concluir a resposta. Verifique o Ollama Cloud e sua conexão e tente novamente.', err=True)
             raise typer.Exit(1) from error
         typer.echo(f'Empório: {response}')
 
@@ -153,4 +154,5 @@ def chat(
 
 
 def main() -> None:
+    load_dotenv(Path.cwd() / '.env', override=False)
     app()

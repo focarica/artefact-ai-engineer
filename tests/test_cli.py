@@ -1,5 +1,7 @@
 import json
 import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -74,14 +76,14 @@ class CliTests(StoreFixture, unittest.TestCase):
         self.assertEqual(result.exit_code, 2, result.output)
         model.assert_not_called()
 
-    def test_chat_auth_error_explains_container_signin(self):
+    def test_chat_auth_error_explains_api_key(self):
         def model(messages, info):
             raise ModelHTTPError(status_code=401, model_name='test', body='private provider details')
 
         with patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
             result = self.invoke('chat', '--message', 'Olá')
         self.assertEqual(result.exit_code, 1, result.output)
-        self.assertIn('docker compose exec ollama ollama signin', result.output)
+        self.assertIn('Verifique OLLAMA_API_KEY', result.output)
         self.assertNotIn('private provider details', result.output)
 
     def test_chat_timeout_is_actionable_without_traceback(self):
@@ -99,3 +101,28 @@ class CliTests(StoreFixture, unittest.TestCase):
         result = self.invoke('chat', '--message', 'Olá')
         self.assertEqual(result.exit_code, 1, result.output)
         self.assertIn('Configuração inválida', result.output)
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_chat_missing_api_key_is_actionable(self):
+        result = self.invoke('chat', '--message', 'Olá')
+        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertIn('Defina OLLAMA_API_KEY', result.output)
+
+
+class EntrypointTests(unittest.TestCase):
+    @patch.dict(os.environ, {'OLLAMA_MODEL': 'environment-model'}, clear=True)
+    def test_main_loads_local_dotenv_without_overriding_environment(self):
+        from artefact_ai.cli import main
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / '.env').write_text('OLLAMA_API_KEY=test-key\nOLLAMA_MODEL=file-model\n')
+
+            def check_environment():
+                self.assertEqual(os.environ['OLLAMA_API_KEY'], 'test-key')
+                self.assertEqual(os.environ['OLLAMA_MODEL'], 'environment-model')
+
+            with patch('artefact_ai.cli.Path.cwd', return_value=path), \
+                    patch('artefact_ai.cli.app', side_effect=check_environment) as application:
+                main()
+            application.assert_called_once_with()

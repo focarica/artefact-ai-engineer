@@ -34,17 +34,17 @@ class Settings:
 
 @dataclass(frozen=True)
 class ChatSettings:
-    """Chat uses Ollama and CSVs without requiring a database connection."""
+    """Chat uses Ollama Cloud and CSVs without requiring a database connection."""
 
     ollama_base_url: str
     ollama_model: str
     data_dir: Path
     history_turn_limit: int = 10
+    ollama_api_key: str = field(default='', repr=False)
 
     @classmethod
     def from_env(cls) -> "ChatSettings":
-        port = os.environ.get("OLLAMA_PORT", "11434")
-        base_url = os.environ.get("OLLAMA_BASE_URL", f"http://localhost:{port}/v1").strip().rstrip("/")
+        base_url = os.environ.get("OLLAMA_BASE_URL", "https://ollama.com/v1").strip().rstrip("/")
         parsed = urlsplit(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("OLLAMA_BASE_URL must be an HTTP(S) URL ending in /v1")
@@ -52,8 +52,10 @@ class ChatSettings:
             raise ValueError("OLLAMA_BASE_URL must end in /v1 without credentials, query or fragment")
         # Accessing port also validates malformed or out-of-range ports.
         parsed.port
-        model = os.environ.get("OLLAMA_MODEL", "deepseek-v4.1-flash:cloud").strip()
+        model = os.environ.get("OLLAMA_MODEL", "deepseek-v4.1-flash").strip()
         if not model:
             raise ValueError("OLLAMA_MODEL must not be empty")
+        if parsed.hostname == 'ollama.com':
+            model = model.removesuffix(':cloud')
         return cls(base_url, model, Path(os.environ.get("DATA_DIR", "../data")).expanduser().resolve(),
-                   history_turn_limit())
+                   history_turn_limit(), os.environ.get('OLLAMA_API_KEY', '').strip())

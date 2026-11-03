@@ -88,6 +88,7 @@ dependencies = [
     { name = "pydantic-ai" },
     { name = "pydantic-settings" },
     { name = "pypdf" },
+    { name = "python-dotenv" },
     { name = "typer" },
 ]
 
@@ -99,6 +100,7 @@ requires-dist = [
     { name = "pydantic-ai", specifier = ">=2.65.0" },
     { name = "pydantic-settings", specifier = ">=2.16.2" },
     { name = "pypdf", specifier = ">=6.21.4" },
+    { name = "python-dotenv", specifier = ">=1.2.4" },
     { name = "typer", specifier = ">=0.27.3" },
 ]
 
