@@ -114,17 +114,16 @@ completo para retomar a conversa.
 
 ### Histórico persistente em SQLite
 
-Para escolher o arquivo e retomar uma sessão em outro processo:
+Para retomar uma sessão no arquivo padrão, use o ID exibido ao sair:
 
 ```sh
-uv run artefact-ai chat \
-  --history-db ./artefact_history.sqlite3 \
-  --session-id demo
+uv run artefact-ai chat --session-id demo
 ```
 
-Ou defina `HISTORY_DB` no `.env`. Use `--session-id` para retomar uma sessão
-existente; sem essa opção, uma sessão nova é criada. Sessões são separadas por
-cliente demonstrativo para não misturar o contexto de pedidos. O SQLite guarda sessões e turnos completos, incluindo
+O caminho padrão é `./artefact_history.sqlite3`. Só informe `--history-db`
+ou `HISTORY_DB` se quiser usar outro arquivo. Sem `--session-id`, uma sessão
+nova é criada. Sessões são separadas por cliente demonstrativo para não misturar
+o contexto de pedidos. O SQLite guarda sessões e turnos completos, incluindo
 chamadas e resultados de ferramentas; `HISTORY_TURN_LIMIT` limita quantos turnos
 são carregados e mantidos por sessão. O arquivo é local, contém dados da conversa
 e não deve ser versionado. Use `--no-history` para uma execução somente em memória.

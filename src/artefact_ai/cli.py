@@ -226,11 +226,11 @@ def chat(
     finally:
         if history is not None:
             history.close()
-            resume_command = [
-                'uv run artefact-ai chat',
-                '--history-db', shlex.quote(str(history.path)),
-                '--session-id', shlex.quote(session_id),
-            ]
+            resume_command = ['uv run artefact-ai chat']
+            default_db = (Path.cwd() / 'artefact_history.sqlite3').resolve()
+            if history.path.resolve() != default_db:
+                resume_command.extend(['--history-db', shlex.quote(str(history.path))])
+            resume_command.extend(['--session-id', shlex.quote(session_id)])
             if customer_id is not None:
                 resume_command.extend(['--customer-id', str(customer_id)])
             typer.echo('\nSessão salva. Para retomá-la, execute:')

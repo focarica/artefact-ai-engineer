@@ -135,6 +135,26 @@ class CliTests(StoreFixture, unittest.TestCase):
         self.assertIn('--history-db', result.output)
         self.assertRegex(result.output, r'--session-id [0-9a-f]{32}')
 
+    def test_default_history_file_is_omitted_from_resume_command(self):
+        def model(messages, info):
+            return ModelResponse(parts=[TextPart('Oi!')])
+
+        with patch.dict(os.environ, {}, clear=True), \
+             patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
+            working_directory = self.directory / 'default-db-cwd'
+            working_directory.mkdir()
+            previous_directory = Path.cwd()
+            os.chdir(working_directory)
+            try:
+                result = CliRunner().invoke(
+                    app, ['chat', '--data-dir', str(self.directory), '--message', 'Olá'])
+                self.assertTrue(Path('artefact_history.sqlite3').exists())
+            finally:
+                os.chdir(previous_directory)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('--session-id', result.output)
+        self.assertNotIn('--history-db', result.output)
+
     def test_session_id_is_not_shown_until_chat_exits(self):
         def model(messages, info):
             return ModelResponse(parts=[TextPart('Estou aqui para ajudar.')])
