@@ -6,7 +6,9 @@ from decimal import Decimal, InvalidOperation
 import json
 import os
 from pathlib import Path
+import shlex
 from typing import Annotated
+from uuid import uuid4
 
 import typer
 from dotenv import load_dotenv
@@ -41,7 +43,7 @@ def output(value: object) -> None:
     typer.echo(json.dumps(value, ensure_ascii=False, indent=2, default=json_value))
 
 
-def show_chat_home(customer_id: int | None, session_id: str | None = None) -> None:
+def show_chat_home(customer_id: int | None, *, persistent_history: bool = False) -> None:
     def centered(text: str, color: str, *, bold: bool = False) -> None:
         typer.echo(styled(text.center(WIDTH), color, bold=bold))
 
@@ -50,8 +52,8 @@ def show_chat_home(customer_id: int | None, session_id: str | None = None) -> No
         typer.echo(line)
     centered('assistente virtual da loja', typer.colors.CYAN)
     centered('Catálogo, pedidos e políticas: estou aqui para ajudar.', typer.colors.WHITE)
-    if session_id:
-        centered(f'Sessão persistente: {session_id} | histórico SQLite | /sair encerra', typer.colors.YELLOW)
+    if persistent_history:
+        centered('Histórico salvo em SQLite | /sair encerra', typer.colors.YELLOW)
     else:
         centered('Sessão temporária | snapshot dos CSVs | /sair encerra', typer.colors.YELLOW)
     if customer_id is not None:
@@ -136,7 +138,7 @@ def chat(
     history_db: Annotated[Path | None, typer.Option('--history-db', envvar='HISTORY_DB',
                                                    help='Arquivo SQLite; padrão: ./artefact_history.sqlite3.')] = None,
     session_id: Annotated[str | None, typer.Option('--session-id',
-                                                  help='Identificador da sessão persistente; padrão: local.')] = None,
+                                                  help='ID para retomar uma sessão anterior; omitido cria uma nova.')] = None,
     no_history: Annotated[bool, typer.Option('--no-history', help='Não persista a conversa em SQLite.')] = False,
 ) -> None:
     """Converse com o assistente; o histórico é persistido em SQLite por padrão."""
@@ -163,7 +165,7 @@ def chat(
             except HistoryError as error:
                 typer.echo(f'Erro no histórico: {error}', err=True)
                 raise typer.Exit(1) from error
-            session_id = session_id or 'local'
+            session_id = session_id or uuid4().hex
         session = ChatSession(
             create_agent(create_model(settings)),
             StoreContext(queries(directory), customer_id, manual_path or directory / 'políticas_da_loja.pdf'),
@@ -206,7 +208,7 @@ def chat(
         if message is not None:
             reply(message)
             return
-        show_chat_home(customer_id, session_id if history else None)
+        show_chat_home(customer_id, persistent_history=history is not None)
         while True:
             try:
                 text = typer.prompt(
@@ -224,6 +226,15 @@ def chat(
     finally:
         if history is not None:
             history.close()
+            resume_command = [
+                'uv run artefact-ai chat',
+                '--history-db', shlex.quote(str(history.path)),
+                '--session-id', shlex.quote(session_id),
+            ]
+            if customer_id is not None:
+                resume_command.extend(['--customer-id', str(customer_id)])
+            typer.echo('\nSessão salva. Para retomá-la, execute:')
+            typer.echo('  ' + ' '.join(resume_command))
 
 
 def main() -> None:

@@ -108,7 +108,9 @@ uv run artefact-ai chat --customer-id 3
 ```
 
 No chat interativo, `/sair` encerra. Por padrão, os turnos são salvos em
-`./artefact_history.sqlite3` e retomados na próxima execução.
+`./artefact_history.sqlite3`. Se você não informar `--session-id`, o chat cria
+um ID único, não o mostra durante o atendimento e exibe, ao sair, o comando
+completo para retomar a conversa.
 
 ### Histórico persistente em SQLite
 
@@ -120,9 +122,9 @@ uv run artefact-ai chat \
   --session-id demo
 ```
 
-Ou defina `HISTORY_DB` no `.env`. Sem `--session-id`, a sessão persistente usa
-`local`; sessões são separadas por cliente demonstrativo para não misturar o
-contexto de pedidos. O SQLite guarda sessões e turnos completos, incluindo
+Ou defina `HISTORY_DB` no `.env`. Use `--session-id` para retomar uma sessão
+existente; sem essa opção, uma sessão nova é criada. Sessões são separadas por
+cliente demonstrativo para não misturar o contexto de pedidos. O SQLite guarda sessões e turnos completos, incluindo
 chamadas e resultados de ferramentas; `HISTORY_TURN_LIMIT` limita quantos turnos
 são carregados e mantidos por sessão. O arquivo é local, contém dados da conversa
 e não deve ser versionado. Use `--no-history` para uma execução somente em memória.

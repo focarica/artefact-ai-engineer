@@ -131,6 +131,23 @@ class CliTests(StoreFixture, unittest.TestCase):
             result = CliRunner().invoke(app, ['chat', '--data-dir', str(self.directory), '--message', 'Olá'])
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertTrue(database.exists())
+        self.assertIn('Sessão salva. Para retomá-la', result.output)
+        self.assertIn('--history-db', result.output)
+        self.assertRegex(result.output, r'--session-id [0-9a-f]{32}')
+
+    def test_session_id_is_not_shown_until_chat_exits(self):
+        def model(messages, info):
+            return ModelResponse(parts=[TextPart('Estou aqui para ajudar.')])
+
+        database = self.directory / 'interactive-history.sqlite3'
+        with patch.dict(os.environ, {'HISTORY_DB': str(database)}), \
+             patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
+            result = CliRunner().invoke(app, ['chat', '--data-dir', str(self.directory)],
+                                        input='Olá\n/sair\n')
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn('Sessão persistente:', result.output)
+        self.assertIn('Histórico salvo em SQLite', result.output)
+        self.assertIn('Sessão salva. Para retomá-la', result.output)
 
     def test_chat_persists_and_resumes_a_sqlite_session(self):
         histories = []
