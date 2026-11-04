@@ -11,13 +11,13 @@ políticas fornecidos no desafio para responder dúvidas de clientes.
 - Python 3.14
 - [UV](https://docs.astral.sh/uv/)
 - Uma chave do [Ollama Cloud](https://ollama.com/settings/keys)
-- Arquivos de dados do desafio: CSVs de categorias, produtos, promoções,
-  clientes, pedidos e itens, além de `políticas_da_loja.pdf`.
+- Dados do desafio, incluídos em `data/`: CSVs de categorias, produtos,
+  promoções, clientes, pedidos e itens, além de `políticas_da_loja.pdf`.
 
-Os arquivos de dados não ficam no repositório. Por padrão, coloque-os em
-`../data`; para outro local, configure `DATA_DIR`. O carregador aceita os nomes
-originais do desafio (como `desafio_tecnico_ai_eng - products.csv`) ou nomes
-simples (`products.csv`), com exatamente um arquivo por tabela.
+O carregador usa `data/` no repositório por padrão. Para outro local, configure
+`DATA_DIR`. Os arquivos mantêm os nomes originais do desafio e há exatamente um
+arquivo por tabela. Os registros são material de demonstração do cenário
+fictício; não use os contatos como dados reais.
 
 ```sh
 uv sync
@@ -30,7 +30,7 @@ Edite `.env` e configure a chave do modelo:
 OLLAMA_API_KEY=sua_chave
 OLLAMA_BASE_URL=https://ollama.com/v1
 OLLAMA_MODEL=gpt-oss:120b
-DATA_DIR=../data
+DATA_DIR=./data
 ```
 
 | Variável | Uso | Padrão |
@@ -38,7 +38,7 @@ DATA_DIR=../data
 | `OLLAMA_API_KEY` | Chave do Ollama Cloud; necessária para conversar com o agente. | vazio |
 | `OLLAMA_BASE_URL` | Endpoint compatível com OpenAI, terminado em `/v1`. | `https://ollama.com/v1` |
 | `OLLAMA_MODEL` | Modelo do chat. O sufixo `:cloud` é removido para a API direta. | `gpt-oss:120b` |
-| `DATA_DIR` | Diretório dos CSVs e do PDF. | `../data` |
+| `DATA_DIR` | Diretório dos CSVs e do PDF. | `data/` no repositório |
 | `HISTORY_TURN_LIMIT` | Turnos mantidos/carregados por sessão. | `10` |
 | `HISTORY_DB` | Sobrescreve o arquivo SQLite padrão. | `./artefact_history.sqlite3` |
 

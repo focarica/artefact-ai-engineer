@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / 'data'
+
 
 def history_turn_limit() -> int:
     limit = int(os.environ.get("HISTORY_TURN_LIMIT", "10"))
@@ -44,7 +46,7 @@ class ChatSettings:
         return cls(
             base_url,
             model,
-            Path(os.environ.get("DATA_DIR", "../data")).expanduser().resolve(),
+            Path(os.environ.get('DATA_DIR', str(DEFAULT_DATA_DIR))).expanduser().resolve(),
             history_turn_limit(),
             os.environ.get('OLLAMA_API_KEY', '').strip(),
             history_db,

@@ -14,6 +14,7 @@ import typer
 from dotenv import load_dotenv
 
 from .banner import WIDTH, banner, styled
+from .config import DEFAULT_DATA_DIR
 from .data.store import DataError, StoreData
 from .queries import StoreQueries
 
@@ -68,7 +69,7 @@ def catalog(
     max_price: Annotated[str | None, typer.Option('--max-price', help='Preço máximo, com ponto decimal.')] = None,
     include_unavailable: Annotated[bool, typer.Option('--include-unavailable')] = False,
     limit: Annotated[int, typer.Option(min=1, max=100)] = 10,
-    data_dir: DataDirectory = Path('../data'),
+    data_dir: DataDirectory = DEFAULT_DATA_DIR,
 ) -> None:
     """Busque instrumentos por preço promocional (antes de desconto PIX)."""
     budget = None
@@ -86,7 +87,7 @@ def catalog(
 @app.command()
 def product(
     product_id: Annotated[int, typer.Argument(min=1)],
-    data_dir: DataDirectory = Path('../data'),
+    data_dir: DataDirectory = DEFAULT_DATA_DIR,
 ) -> None:
     """Consulte preço, estoque e promoção de um produto, inclusive indisponível."""
     offer = queries(data_dir).product_offer(product_id)
@@ -100,7 +101,7 @@ def product(
 def order(
     order_id: Annotated[int, typer.Argument(min=1)],
     customer_id: Annotated[int, typer.Option('--customer-id', min=1, help='ID de demonstração; não autentica o cliente.')],
-    data_dir: DataDirectory = Path('../data'),
+    data_dir: DataDirectory = DEFAULT_DATA_DIR,
 ) -> None:
     """Consulte um pedido do cliente informado (modo demonstrativo)."""
     result = queries(data_dir).order_summary(order_id, customer_id)
@@ -114,7 +115,7 @@ def order(
 def policies(
     query: Annotated[str, typer.Argument(help='Dúvida ou assunto a buscar no manual.')],
     manual_path: ManualPath = None,
-    data_dir: DataDirectory = Path('../data'),
+    data_dir: DataDirectory = DEFAULT_DATA_DIR,
     limit: Annotated[int, typer.Option(min=1, max=5, help='Número máximo de capítulos completos.')] = 3,
 ) -> None:
     """Inspecione os trechos do manual com seção e página, sem banco ou modelo."""

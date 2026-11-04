@@ -12,6 +12,7 @@ class ChatSettingsTests(unittest.TestCase):
         settings = ChatSettings.from_env()
         self.assertEqual(settings.ollama_model, 'gpt-oss:120b')
         self.assertEqual(settings.ollama_base_url, 'https://ollama.com/v1')
+        self.assertEqual(settings.data_dir, Path(__file__).resolve().parents[1] / 'data')
         self.assertEqual(settings.history_turn_limit, 10)
         self.assertEqual(settings.history_db, Path('./artefact_history.sqlite3').resolve())
 
