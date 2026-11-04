@@ -199,7 +199,8 @@ replace checking the source data.
 
 ## 4. Conversation examples
 
-The repository contains five captured conversations in [`conversations/`](conversations/),
-covering catalog/PIX pricing, returns, order isolation, policy ambiguities, scope
-boundaries, and missing information. The return conversation demonstrates
-consulting and applying the store policy manual.
+The [`conversations/`](conversations/) folder contains five examples: three
+Markdown transcripts covering catalog/PIX pricing, returns, and order isolation,
+plus two CLI screenshots covering contact/shipping/personalization and keyboard
+catalog pricing. The return transcript demonstrates applying the store policy
+manual.
