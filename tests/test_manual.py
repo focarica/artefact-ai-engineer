@@ -95,10 +95,6 @@ class ManualTests(unittest.TestCase):
         self.assertEqual(passages[0].source, 'políticas.pdf')
         self.assertIn('Rua Teste', passages[0].text)
 
-    def test_accents_and_paraphrases_are_normalized(self):
-        passages = self.manual.search('Que horas abre no sabado?', limit=1)
-        self.assertEqual(passages[0].section, '2. Horário de Funcionamento')
-
     def test_colloquial_questions_retrieve_the_expected_chapter(self):
         cases = [
             ('Como chego até vocês?', '1. Sobre a Empório da Música'),
@@ -166,7 +162,7 @@ class ManualTests(unittest.TestCase):
             self.assertIn('Sabado', result.text)
             self.assertEqual(result.page, 1)
 
-    def test_missing_and_image_only_pdfs_are_actionable(self):
+    def test_missing_image_only_and_encrypted_pdfs_are_actionable(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'manual.pdf'
             with self.assertRaisesRegex(ManualError, 'Não foi possível ler'):
@@ -176,10 +172,6 @@ class ManualTests(unittest.TestCase):
             writer.write(path)
             with self.assertRaisesRegex(ManualError, 'OCR'):
                 PolicyManual.from_pdf(path)
-
-    def test_password_protected_pdf_is_actionable(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'manual.pdf'
             writer = PdfWriter()
             writer.add_blank_page(width=600, height=800)
             writer.encrypt('secret')

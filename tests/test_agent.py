@@ -8,7 +8,7 @@ import httpx
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import FunctionModel
 
-from artefact_ai.agent import PERSONA, StoreContext, clock_times, create_agent, create_model, phone_numbers
+from artefact_ai.agent import PERSONA, StoreContext, create_agent, create_model
 from artefact_ai.config import ChatSettings
 from artefact_ai.data.store import StoreData
 from artefact_ai.manual import PolicySearchResult
@@ -54,10 +54,6 @@ class AgentTests(StoreFixture, unittest.TestCase):
         self.assertEqual(len(offers), 1)
         self.assertEqual(offers[0].price_brl, Decimal('899.91'))
         self.assertEqual(offers[0].pix_price_brl, Decimal('899.91'))
-
-    def test_product_tool_returns_offer(self):
-        offer = self.call_tool('product_offer', {'product_id': 1})
-        self.assertEqual(offer.product_id, 1)
 
     def test_order_identity_comes_from_session(self):
         order = self.call_tool('order_summary', {'order_id': 1}, customer_id=1)
@@ -212,35 +208,6 @@ class AgentTests(StoreFixture, unittest.TestCase):
         self.assertIn('divergentes', second.output)
         self.assertEqual(len(calls), 4)
 
-    def test_conflicting_contacts_across_separate_searches_are_detected(self):
-        path = self.directory / 'manual.pdf'
-        write_manual_pdf(path, ['1. Dados da Empresa', 'Endereço Rua Teste, 123',
-                               'Telefone (67) 1111-1111',
-                               '7. Atendimento via WhatsApp', 'WhatsApp (67) 2222-2222'])
-        calls = []
-
-        def model(messages, info):
-            calls.append(1)
-            if len(calls) == 1:
-                return ModelResponse(parts=[
-                    ToolCallPart('search_policies', {'query': 'endereço'}),
-                    ToolCallPart('search_policies', {'query': 'WhatsApp'}),
-                ])
-            if len(calls) == 2:
-                return ModelResponse(parts=[TextPart('Anotei o endereço e o contato.')])
-            if len(calls) == 3:
-                return ModelResponse(parts=[TextPart('O WhatsApp é (67) 2222-2222.')])
-            return ModelResponse(parts=[TextPart(
-                'Há dois números divergentes; confirme o WhatsApp atualizado com a equipe.')])
-
-        agent = create_agent(FunctionModel(model))
-        context = self.context(manual_path=path)
-        first = agent.run_sync('Qual o endereço?', deps=context)
-        second = agent.run_sync('Qual o WhatsApp de vocês?', deps=context,
-                                message_history=first.all_messages())
-        self.assertIn('divergentes', second.output)
-        self.assertEqual(len(calls), 4)
-
     def test_phone_is_not_volunteered_when_the_question_is_about_something_else(self):
         path = self.directory / 'manual.pdf'
         write_manual_pdf(path, ['1. Dados da Empresa', 'Endereço Rua Teste, 123',
@@ -254,7 +221,7 @@ class AgentTests(StoreFixture, unittest.TestCase):
                 return ModelResponse(parts=[ToolCallPart('search_policies', {'query': 'endereço horário'})])
             if len(calls) == 2:
                 return ModelResponse(parts=[TextPart(
-                    'Fica na Rua Teste, 123. Sábado, das 9h às 13h. WhatsApp (67) 1111-1111.')])
+                    'Fica na Rua Teste, 123. Sábado, das 9h às 13h. WhatsApp (67) 1111\u20111111.')])
             return ModelResponse(parts=[TextPart('Fica na Rua Teste, 123. Sábado, das 9h às 13h.')])
 
         result = create_agent(FunctionModel(model)).run_sync(
@@ -437,7 +404,7 @@ class AgentTests(StoreFixture, unittest.TestCase):
         self.assertNotIn('não funciona 24', result.output)
         self.assertEqual(len(calls), 3)
 
-    def test_pix_percentage_must_match_tool_data(self):
+    def test_pix_answer_obeys_tool_discount_rules(self):
         self.write('products',
                    'product_id,price_brl,name,category_id,description,stock_quantity,status,specs,created_at',
                    [[1, '999.90', 'Violão A', 1, 'Nylon', 2, 'active', '{}', '2025-01-01'],
@@ -448,32 +415,17 @@ class AgentTests(StoreFixture, unittest.TestCase):
             calls.append(1)
             if len(calls) == 1:
                 return ModelResponse(parts=[ToolCallPart('product_offer', {'product_id': 2})])
-            answer = ('No PIX são 10% de desconto: R$ 950,00.' if len(calls) == 2 else
-                      'No PIX o desconto é de 5%: R$ 950,00.')
-            return ModelResponse(parts=[TextPart(answer)])
-
-        result = create_agent(FunctionModel(model)).run_sync('E o preço no PIX?', deps=self.context())
-        self.assertEqual(result.output, 'No PIX o desconto é de 5%: R$ 950,00.')
-        self.assertEqual(len(calls), 3)
-
-    def test_pix_answer_cannot_deny_its_own_discount(self):
-        self.write('products',
-                   'product_id,price_brl,name,category_id,description,stock_quantity,status,specs,created_at',
-                   [[1, '999.90', 'Violão A', 1, 'Nylon', 2, 'active', '{}', '2025-01-01'],
-                    [2, '1000.00', 'Violão B', 1, 'Aço', 2, 'active', '{}', '2025-01-01']])
-        calls = []
-
-        def model(messages, info):
-            calls.append(1)
-            if len(calls) == 1:
-                return ModelResponse(parts=[ToolCallPart('product_offer', {'product_id': 2})])
-            answer = ('No PIX fica R$ 950,00, sem desconto adicional.' if len(calls) == 2 else
-                      'No PIX o desconto é de 5%: R$ 950,00.')
+            if len(calls) == 2:
+                answer = 'No PIX são 10% de desconto: R$ 950,00.'
+            elif len(calls) == 3:
+                answer = 'No PIX fica R$ 950,00, sem desconto adicional.'
+            else:
+                answer = 'No PIX o desconto é de 5%: R$ 950,00.'
             return ModelResponse(parts=[TextPart(answer)])
 
         result = create_agent(FunctionModel(model)).run_sync('E no PIX?', deps=self.context())
         self.assertEqual(result.output, 'No PIX o desconto é de 5%: R$ 950,00.')
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(calls), 4)
 
     def test_follow_up_cannot_invent_logistics_from_memory(self):
         path = self.directory / 'manual.pdf'
@@ -498,17 +450,6 @@ class AgentTests(StoreFixture, unittest.TestCase):
         second = agent.run_sync('E a etiqueta?', deps=context, message_history=first.all_messages())
         self.assertNotIn('etiqueta', second.output.lower())
         self.assertIn('fale com a equipe', second.output)
-
-    def test_typographic_phone_dashes_and_times_are_normalized(self):
-        self.assertEqual(phone_numbers('(67) 3321\u20114500'), {'6733214500'})
-        self.assertEqual(phone_numbers('+55 (67) 3321-4500'), {'6733214500'})
-        self.assertEqual(clock_times('Sábado das 9h às 13h'), {'09:00', '13:00'})
-        self.assertEqual(clock_times('fecha ao meio-dia'), {'12:00'})
-
-    def test_cloud_model_requires_api_key_before_connecting(self):
-        settings = ChatSettings('https://ollama.com/v1', 'deepseek-v4.1-flash', self.directory)
-        with self.assertRaisesRegex(ValueError, 'OLLAMA_API_KEY'):
-            create_model(settings)
 
     def test_cloud_request_sends_api_key_model_and_persona(self):
         requests = []

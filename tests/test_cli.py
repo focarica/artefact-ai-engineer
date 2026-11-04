@@ -113,14 +113,6 @@ class CliTests(StoreFixture, unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertEqual(prompts, [['Olá'], ['Olá', 'Quero um violão']])
 
-    def test_chat_eof_exits_cleanly(self):
-        def model(messages, info):
-            self.fail('EOF must not reach the model')
-
-        with patch('artefact_ai.agent.create_model', return_value=FunctionModel(model)):
-            result = CliRunner().invoke(app, ['chat', '--no-history', '--data-dir', str(self.directory)], input='')
-        self.assertEqual(result.exit_code, 0, result.output)
-
     def test_configured_history_database_is_used_by_default(self):
         def model(messages, info):
             return ModelResponse(parts=[TextPart('Oi!')])

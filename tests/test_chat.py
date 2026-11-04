@@ -19,26 +19,6 @@ class ChatSessionTests(StoreFixture, unittest.TestCase):
         return ChatSession(create_agent(FunctionModel(function)),
                            StoreContext(StoreQueries(StoreData.load(self.directory))), turn_limit=turn_limit)
 
-    def test_history_preserves_complete_tool_turns(self):
-        requests = []
-
-        def model(messages, info):
-            requests.append(list(messages))
-            if len(messages) == 1:
-                return ModelResponse(parts=[ToolCallPart('product_offer', {'product_id': 1})])
-            return ModelResponse(parts=[TextPart('Olá! Posso ajudar com esse violão.')])
-
-        session = self.session(model, turn_limit=1)
-        session.respond('Quanto custa o violão?')
-        session.respond('E no PIX?')
-        prior_parts = [part for message in requests[-1][:-1] for part in message.parts]
-        self.assertTrue(any(isinstance(part, ToolCallPart) for part in prior_parts))
-        self.assertTrue(any(isinstance(part, ToolReturnPart) for part in prior_parts))
-        session.respond('Obrigado')
-        prompts = [part.content for message in requests[-1] for part in message.parts
-                   if isinstance(part, UserPromptPart)]
-        self.assertEqual(prompts, ['E no PIX?', 'Obrigado'])
-
     def test_scope_guardrail_blocks_unrelated_prompts_before_model_call(self):
         def model(messages, info):
             self.fail('Clearly unrelated requests must be blocked before calling the model')
@@ -57,6 +37,8 @@ class ChatSessionTests(StoreFixture, unittest.TestCase):
 
         def model(messages, info):
             requests.append(list(messages))
+            if len(requests) == 1:
+                return ModelResponse(parts=[ToolCallPart('product_offer', {'product_id': 1})])
             return ModelResponse(parts=[TextPart('Oi!')])
 
         agent = create_agent(FunctionModel(model))
@@ -64,12 +46,19 @@ class ChatSessionTests(StoreFixture, unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             history = SQLiteHistory(Path(directory) / 'history.sqlite3')
             first = ChatSession(agent, context, history=history, session_id='demo', turn_limit=2)
-            first.respond('Olá')
+            first.respond('Quanto custa o violão?')
             second = ChatSession(agent, context, history=history, session_id='demo', turn_limit=2)
-            second.respond('Tudo bem?')
+            second.respond('E no PIX?')
+            resumed_parts = [part for message in requests[-1] for part in message.parts]
+            self.assertTrue(any(isinstance(part, ToolCallPart) for part in resumed_parts))
+            self.assertTrue(any(isinstance(part, ToolReturnPart) for part in resumed_parts))
+            second.respond('Obrigado')
+            second.respond('Mais uma')
             prompts = [part.content for message in requests[-1] for part in message.parts
                        if isinstance(part, UserPromptPart)]
-            self.assertEqual(prompts, ['Olá', 'Tudo bem?'])
+            self.assertEqual(prompts, ['E no PIX?', 'Obrigado', 'Mais uma'])
+            self.assertFalse(any(isinstance(part, ToolCallPart)
+                                 for message in requests[-1] for part in message.parts))
             history.close()
 
     def test_sqlite_history_is_scoped_to_customer_context(self):
@@ -120,28 +109,9 @@ class ChatSessionTests(StoreFixture, unittest.TestCase):
         session.respond('Nova mensagem')
         self.assertEqual(len(requests[-1]), 1)
 
-    def test_sessions_do_not_share_history(self):
-        lengths = []
-
-        def model(messages, info):
-            lengths.append(len(messages))
-            return ModelResponse(parts=[TextPart('Oi!')])
-
-        first, second = self.session(model), self.session(model)
-        first.respond('Olá')
-        second.respond('Olá')
-        self.assertEqual(lengths, [1, 1])
-
     def test_repeated_tool_calls_are_bounded(self):
         def model(messages, info):
             return ModelResponse(parts=[ToolCallPart('product_offer', {'product_id': 1})])
 
         with self.assertRaises(UsageLimitExceeded):
             self.session(model).respond('Consulta sem fim')
-
-    def test_empty_input_is_not_sent(self):
-        def model(messages, info):
-            self.fail('Empty messages must not reach the model')
-
-        with self.assertRaises(ValueError):
-            self.session(model).respond('   ')

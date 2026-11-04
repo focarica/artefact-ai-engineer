@@ -45,7 +45,7 @@ class StoreTests(StoreFixture, unittest.TestCase):
         with self.assertRaisesRegex(DataError, 'Duplicate customer'):
             StoreData.load(self.directory)
 
-    def test_rejects_nonfinite_price(self):
+    def test_rejects_nonfinite_promotion_discount(self):
         self.write('promotions', 'promotion_id,product_id,discount_percent,description,is_active',
                    [[1, 1, 'NaN', 'Oferta', 1]])
         with self.assertRaises(DataError):

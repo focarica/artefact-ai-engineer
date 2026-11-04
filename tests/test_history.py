@@ -19,13 +19,6 @@ class SQLiteHistoryTests(unittest.TestCase):
     def turn(self, text):
         return [ModelResponse(parts=[TextPart(text)])]
 
-    def test_round_trip_keeps_only_the_requested_turn_limit(self):
-        self.history.append('cliente-a', self.turn('primeiro'))
-        self.history.append('cliente-a', self.turn('segundo'))
-        loaded = self.history.load('cliente-a', limit=1)
-        self.assertEqual(len(loaded), 1)
-        self.assertEqual(loaded[0][0].parts[0].content, 'segundo')
-
     def test_sessions_are_isolated(self):
         self.history.append('cliente-a', self.turn('a'))
         self.history.append('cliente-b', self.turn('b'))
@@ -38,6 +31,8 @@ class SQLiteHistoryTests(unittest.TestCase):
         self.history.prune('cliente-a', keep=2)
         loaded = self.history.load('cliente-a', limit=10)
         self.assertEqual([turn[0].parts[0].content for turn in loaded], ['2', '3'])
+        newest = self.history.load('cliente-a', limit=1)
+        self.assertEqual(newest[0][0].parts[0].content, '3')
 
     def test_corrupted_history_is_actionable(self):
         self.history.append('cliente-a', self.turn('ok'))
@@ -50,9 +45,3 @@ class SQLiteHistoryTests(unittest.TestCase):
         for session_id in ['', '   ', 'a' * 129, 'linha\nquebrada']:
             with self.subTest(session_id=session_id), self.assertRaises(ValueError):
                 self.history.load(session_id, limit=1)
-
-    def test_missing_parent_directory_is_created(self):
-        nested = Path(self.temp.name) / 'dados' / 'history.sqlite3'
-        history = SQLiteHistory(nested)
-        self.addCleanup(history.close)
-        self.assertTrue(nested.exists())

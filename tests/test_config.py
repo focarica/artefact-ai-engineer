@@ -35,7 +35,7 @@ class ChatSettingsTests(unittest.TestCase):
         self.assertEqual(ChatSettings.from_env().history_db, expected)
 
     @patch.dict(os.environ, {'OLLAMA_BASE_URL': 'http://ollama:11434/v1/'}, clear=True)
-    def test_explicit_url_takes_precedence(self):
+    def test_base_url_trailing_slash_is_normalized(self):
         self.assertEqual(ChatSettings.from_env().ollama_base_url, 'http://ollama:11434/v1')
 
     def test_rejects_invalid_configuration(self):
